@@ -1075,8 +1075,6 @@ class KeeneticMeshUptimeSensor(BaseKeeneticSensor):
             "name": self._entry.title,
             "manufacturer": "Keenetic",
         }
-<<<<<<< Updated upstream
-=======
         
       
 class KeeneticMeshClientsSensor(BaseKeeneticSensor):
@@ -1268,4 +1266,3 @@ class KeeneticWifiNoiseFloorSensor(BaseKeeneticSensor):
     @property
     def available(self) -> bool:
         return self.native_value is not None
->>>>>>> Stashed changes
