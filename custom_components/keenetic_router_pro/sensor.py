@@ -45,6 +45,7 @@ async def async_setup_entry(
         node_cid = node.get("cid") or node.get("id")
         if node_cid:
             entities.append(KeeneticMeshFirmwareSensor(coordinator, entry, node_cid))
+            entities.append(KeeneticMeshUptimeSensor(coordinator, entry, node_cid))
 
     # WireGuard profilleri için sensörler
     wg_profiles = coordinator.data.get("wireguard", {}).get("profiles", {})
@@ -826,6 +827,24 @@ class KeeneticMeshFirmwareSensor(BaseKeeneticSensor):
         self._node_cid = node_cid
 
     @property
+    def device_info(self) -> dict[str, Any]:
+        node = self._node
+        if node:
+            node_name = node.get("name") or node.get("mac") or self._node_cid
+            return {
+                "identifiers": {(DOMAIN, f"mesh_{self._node_cid}")},
+                "name": f"Mesh - {node_name}",
+                "manufacturer": "Keenetic",
+                "model": node.get("model") or "Extender",
+                "via_device": (DOMAIN, self._entry.entry_id),
+            }
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+            "name": self._entry.title,
+            "manufacturer": "Keenetic",
+        }
+    
+    @property
     def _node(self) -> dict[str, Any] | None:
         """Get current node data."""
         nodes = self.coordinator.data.get("mesh_nodes", [])
@@ -898,6 +917,21 @@ class KeeneticMeshUsbStorageSensor(BaseKeeneticSensor):
         self._mesh_cid = mesh_cid
 
     @property
+    def device_info(self) -> dict[str, Any]:
+        if self._mesh_cid:
+            return {
+                "identifiers": {(DOMAIN, f"mesh_{self._mesh_cid}")},
+                "name": f"Mesh - {self._mesh_node_name}",
+                "manufacturer": "Keenetic",
+                "via_device": (DOMAIN, self._entry.entry_id),
+            }
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+            "name": self._entry.title,
+            "manufacturer": "Keenetic",
+        }   
+
+    @property
     def _device(self) -> dict[str, Any] | None:
         """Get current device data from mesh USB list."""
         devices = self.coordinator.data.get("mesh_usb", [])
@@ -961,3 +995,74 @@ class KeeneticMeshUsbStorageSensor(BaseKeeneticSensor):
             "percent_used": percent_used,
         }
 
+class KeeneticMeshUptimeSensor(BaseKeeneticSensor):
+    """Mesh node uptime sensor."""
+    _attr_translation_key = "mesh_uptime"
+    _attr_icon = "mdi:timer-outline"
+
+    def __init__(
+        self, 
+        coordinator: KeeneticCoordinator, 
+        entry: ConfigEntry, 
+        node_cid: str
+    ) -> None:
+        super().__init__(coordinator, entry)
+        self._node_cid = node_cid
+
+    @property
+    def _node(self) -> dict[str, Any] | None:
+        """Get current node data."""
+        nodes = self.coordinator.data.get("mesh_nodes", [])
+        for node in nodes:
+            if (node.get("cid") or node.get("id")) == self._node_cid:
+                return node
+        return None
+
+    @property
+    def unique_id(self) -> str:
+        safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
+        return f"{self._entry.entry_id}_mesh_{safe_cid}_uptime"
+
+    @property
+    def name(self) -> str:
+        node = self._node
+        if node:
+            node_name = node.get("name") or node.get("mac") or self._node_cid
+            return f"Mesh - {node_name} Uptime"
+        return f"Mesh - {self._node_cid} Uptime"
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return UnitOfTime.SECONDS
+
+    @property
+    def native_value(self) -> int:
+        """Return uptime in seconds."""
+        node = self._node
+        if node:
+            uptime = node.get("uptime")
+            if uptime not in (None, "", "unknown", "Unknown"):
+                try:
+                    return int(float(uptime))
+                except (TypeError, ValueError):
+                    pass
+        return 0
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Создаёт ОТДЕЛЬНОЕ устройство для этого ретранслятора."""
+        node = self._node
+        if node:
+            node_name = node.get("name") or node.get("mac") or self._node_cid
+            return {
+                "identifiers": {(DOMAIN, f"mesh_{self._node_cid}")},
+                "name": f"Mesh - {node_name}",
+                "manufacturer": "Keenetic",
+                "model": node.get("model") or "Extender",
+                "via_device": (DOMAIN, self._entry.entry_id),  # Связь с главным роутером
+            }
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+            "name": self._entry.title,
+            "manufacturer": "Keenetic",
+        }

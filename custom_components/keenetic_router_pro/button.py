@@ -113,6 +113,16 @@ class KeeneticMeshRebootButton(ButtonEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
+        node = self._node
+        if node:
+            node_name = node.get("name") or node.get("mac") or self._node_cid
+            return {
+                "identifiers": {(DOMAIN, f"mesh_{self._node_cid}")},
+                "name": f"Mesh - {node_name}",
+                "manufacturer": "Keenetic",
+                "model": node.get("model") or "Extender",
+                "via_device": (DOMAIN, self._entry.entry_id),
+            }
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
             "name": self._entry.title,
