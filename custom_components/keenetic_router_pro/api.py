@@ -1340,6 +1340,9 @@ class KeeneticClient:
             cmd = f"ip hotspot host {mac_clean} permit"
             await self._rci_parse(cmd)
         else:
+            # Önce erişimi aç (deny durumundaysa permit'e çevir)
+            cmd = f"ip hotspot host {mac_clean} permit"
+            await self._rci_parse(cmd)
 
             cmd = f"ip hotspot host {mac_clean} policy {policy}"
             _LOGGER.debug("Setting client %s policy to %s", mac_clean, policy)
