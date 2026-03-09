@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Optional, Dict, List
+from homeassistant.exceptions import HomeAssistantError
 
 import aiohttp
 import async_timeout
@@ -1362,3 +1363,77 @@ class KeeneticClient:
     async def async_unblock_client(self, mac: str) -> None:
         """Unblock a client's internet access."""
         await self.async_set_client_policy(mac, "default")
+
+    async def async_check_firmware_update(self) -> Dict[str, Any]:
+        """Check for available firmware update via /rci/show/version."""
+        try:
+            data = await self._rci_get("show/version")
+            if not data:
+                return {}
+            
+            current = data.get("title") or data.get("release")
+            available = data.get("fw-available") or data.get("release-available")
+            
+            # Проверяем, есть ли обновление (только stable канал)
+            has_update = (
+                current and available and 
+                current != available and
+                data.get("fw-update-sandbox") == "stable"
+            )
+            
+            return {
+                "current": {
+                    "title": current,
+                    "release": data.get("release"),
+                },
+                "available": {
+                    "title": available,
+                    "release": data.get("release-available"),
+                } if has_update else None,
+                "channel": data.get("fw-update-sandbox"),
+                "has_update": has_update,
+            }
+        except Exception as err:
+            _LOGGER.debug("Error checking firmware update: %s", err)
+            return {}
+
+
+    async def async_start_firmware_update(self) -> bool:
+        """Start firmware update process via /rci/system/update."""
+        try:
+            # Команда запуска обновления с подтверждением
+            result = await self._rci_post("system/update", {"confirm": True})
+            
+            # Успешный ответ обычно содержит статус
+            if isinstance(result, dict):
+                status = result.get("status") or result.get("result")
+                if status in ("started", "ok", True, "accepted"):
+                    _LOGGER.info("Firmware update started")
+                    return True
+            
+            # Некоторые версии возвращают просто 200 без тела
+            return result is not None
+            
+        except Exception as err:
+            _LOGGER.error("Error starting firmware update: %s", err)
+            raise HomeAssistantError(f"Failed to start update: {err}")
+
+
+    async def async_get_update_progress(self) -> Dict[str, Any]:
+        """Get current update progress (if in progress).
+        
+        Returns progress info or empty dict if no update running.
+        """
+        try:
+            data = await self._rci_get("system/update/status")
+            if not data or not isinstance(data, dict):
+                return {}
+            
+            return {
+                "in_progress": data.get("in-progress", False),
+                "progress_percent": data.get("progress", 0),
+                "stage": data.get("stage"),
+                "eta_seconds": data.get("eta"),
+            }
+        except Exception:
+            return {}
