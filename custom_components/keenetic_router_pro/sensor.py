@@ -16,7 +16,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from .const import DOMAIN, DATA_COORDINATOR
+from .const import DOMAIN, DATA_COORDINATOR, CONF_TRACKED_CLIENTS
 from .coordinator import KeeneticCoordinator
 from .entity import ControllerEntity, MeshEntity
 
@@ -47,6 +47,23 @@ async def async_setup_entry(
 
     entities.append(KeeneticWifi24TemperatureSensor(coordinator, entry))
     entities.append(KeeneticWifi5TemperatureSensor(coordinator, entry))
+
+    # === ТРАФИК СЕНСОРЫ ===
+    # WiFi 2.4GHz
+    entities.append(KeeneticWifi24RxSensor(coordinator, entry))
+    entities.append(KeeneticWifi24TxSensor(coordinator, entry))
+    
+    # WiFi 5GHz
+    entities.append(KeeneticWifi5RxSensor(coordinator, entry))
+    entities.append(KeeneticWifi5TxSensor(coordinator, entry))
+    
+    # LAN
+    entities.append(KeeneticLanRxSensor(coordinator, entry))
+    entities.append(KeeneticLanTxSensor(coordinator, entry))
+    
+    # WAN
+    entities.append(KeeneticWanRxSensor(coordinator, entry))
+    entities.append(KeeneticWanTxSensor(coordinator, entry))
 
     mesh_nodes = coordinator.data.get("mesh_nodes", [])
     for node in mesh_nodes:
@@ -945,3 +962,368 @@ class KeeneticWifi5TemperatureSensor(ControllerEntity, SensorEntity):
     @property
     def available(self) -> bool:
         return self.native_value is not None
+    
+# =============================================================================
+# INTERFACE TRAFFIC SENSORS (из /rci/show/interface/stat)
+# =============================================================================
+
+class KeeneticInterfaceRxSensor(ControllerEntity, SensorEntity):
+    """Сенсор входящего трафика для конкретного интерфейса."""
+    _attr_translation_key = "interface_rx"
+    _attr_icon = "mdi:download-network"
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self, 
+        coordinator: KeeneticCoordinator, 
+        entry: ConfigEntry, 
+        iface_name: str,
+        iface_label: str,
+    ) -> None:
+        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
+        self._iface_name = iface_name
+        self._iface_label = iface_label
+
+    @property
+    def unique_id(self) -> str:
+        safe_name = self._iface_name.replace("/", "_").lower()
+        return f"{self._entry_id}_iface_{safe_name}_rx"
+
+    @property
+    def name(self) -> str:
+        return f"{self._iface_label} RX"
+
+    @property
+    def native_value(self) -> float | None:
+        stats = self.coordinator.data.get("interface_stats", {})
+        iface_stats = stats.get(self._iface_name, {})
+        rxbytes = iface_stats.get("rxbytes", 0)
+        if rxbytes:
+            return round(float(rxbytes) / (1024 ** 3), 2)
+        return 0.0
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        stats = self.coordinator.data.get("interface_stats", {})
+        iface_stats = stats.get(self._iface_name, {})
+        return {
+            "interface": self._iface_name,
+            "type": iface_stats.get("interface_type"),
+            "link": iface_stats.get("link"),
+            "state": iface_stats.get("state"),
+            "rxpackets": iface_stats.get("rxpackets"),
+            "rxerrors": iface_stats.get("rxerrors"),
+            "rxdropped": iface_stats.get("rxdropped"),
+        }
+
+
+class KeeneticInterfaceTxSensor(ControllerEntity, SensorEntity):
+    """Сенсор исходящего трафика для конкретного интерфейса."""
+    _attr_translation_key = "interface_tx"
+    _attr_icon = "mdi:upload-network"
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self, 
+        coordinator: KeeneticCoordinator, 
+        entry: ConfigEntry, 
+        iface_name: str,
+        iface_label: str,
+    ) -> None:
+        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
+        self._iface_name = iface_name
+        self._iface_label = iface_label
+
+    @property
+    def unique_id(self) -> str:
+        safe_name = self._iface_name.replace("/", "_").lower()
+        return f"{self._entry_id}_iface_{safe_name}_tx"
+
+    @property
+    def name(self) -> str:
+        return f"{self._iface_label} TX"
+
+    @property
+    def native_value(self) -> float | None:
+        stats = self.coordinator.data.get("interface_stats", {})
+        iface_stats = stats.get(self._iface_name, {})
+        txbytes = iface_stats.get("txbytes", 0)
+        if txbytes:
+            return round(float(txbytes) / (1024 ** 3), 2)
+        return 0.0
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        stats = self.coordinator.data.get("interface_stats", {})
+        iface_stats = stats.get(self._iface_name, {})
+        return {
+            "interface": self._iface_name,
+            "type": iface_stats.get("interface_type"),
+            "link": iface_stats.get("link"),
+            "state": iface_stats.get("state"),
+            "txpackets": iface_stats.get("txpackets"),
+            "txerrors": iface_stats.get("txerrors"),
+            "txdropped": iface_stats.get("txdropped"),
+        }
+
+
+class KeeneticWifi24RxSensor(ControllerEntity, SensorEntity):
+    """WiFi 2.4GHz RX sensor."""
+    _attr_translation_key = "wifi_24_rx"
+    _attr_icon = "mdi:download-network"
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
+        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
+        self._iface_name = "WifiMaster0"
+        self._band = "2.4GHz"
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._entry_id}_wifi_24_rx"
+
+    @property
+    def name(self) -> str:
+        return f"WiFi {self._band} RX"
+
+    @property
+    def native_value(self) -> float | None:
+        stats = self.coordinator.data.get("interface_stats", {})
+        iface_stats = stats.get(self._iface_name, {})
+        rxbytes = iface_stats.get("rxbytes", 0)
+        if rxbytes:
+            return round(float(rxbytes) / (1024 ** 3), 2)
+        return 0.0
+
+
+class KeeneticWifi24TxSensor(ControllerEntity, SensorEntity):
+    """WiFi 2.4GHz TX sensor."""
+    _attr_translation_key = "wifi_24_tx"
+    _attr_icon = "mdi:upload-network"
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
+        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
+        self._iface_name = "WifiMaster0"
+        self._band = "2.4GHz"
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._entry_id}_wifi_24_tx"
+
+    @property
+    def name(self) -> str:
+        return f"WiFi {self._band} TX"
+
+    @property
+    def native_value(self) -> float | None:
+        stats = self.coordinator.data.get("interface_stats", {})
+        iface_stats = stats.get(self._iface_name, {})
+        txbytes = iface_stats.get("txbytes", 0)
+        if txbytes:
+            return round(float(txbytes) / (1024 ** 3), 2)
+        return 0.0
+
+
+class KeeneticWifi5RxSensor(ControllerEntity, SensorEntity):
+    """WiFi 5GHz RX sensor."""
+    _attr_translation_key = "wifi_5_rx"
+    _attr_icon = "mdi:download-network"
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
+        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
+        self._iface_name = "WifiMaster1"
+        self._band = "5GHz"
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._entry_id}_wifi_5_rx"
+
+    @property
+    def name(self) -> str:
+        return f"WiFi {self._band} RX"
+
+    @property
+    def native_value(self) -> float | None:
+        stats = self.coordinator.data.get("interface_stats", {})
+        iface_stats = stats.get(self._iface_name, {})
+        rxbytes = iface_stats.get("rxbytes", 0)
+        if rxbytes:
+            return round(float(rxbytes) / (1024 ** 3), 2)
+        return 0.0
+
+
+class KeeneticWifi5TxSensor(ControllerEntity, SensorEntity):
+    """WiFi 5GHz TX sensor."""
+    _attr_translation_key = "wifi_5_tx"
+    _attr_icon = "mdi:upload-network"
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
+        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
+        self._iface_name = "WifiMaster1"
+        self._band = "5GHz"
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._entry_id}_wifi_5_tx"
+
+    @property
+    def name(self) -> str:
+        return f"WiFi {self._band} TX"
+
+    @property
+    def native_value(self) -> float | None:
+        stats = self.coordinator.data.get("interface_stats", {})
+        iface_stats = stats.get(self._iface_name, {})
+        txbytes = iface_stats.get("txbytes", 0)
+        if txbytes:
+            return round(float(txbytes) / (1024 ** 3), 2)
+        return 0.0
+
+
+class KeeneticLanRxSensor(ControllerEntity, SensorEntity):
+    """LAN (GigabitEthernet0) RX sensor."""
+    _attr_translation_key = "lan_rx"
+    _attr_icon = "mdi:download-network"
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
+        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
+        self._iface_name = "GigabitEthernet0"
+        self._label = "LAN"
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._entry_id}_lan_rx"
+
+    @property
+    def name(self) -> str:
+        return f"{self._label} RX"
+
+    @property
+    def native_value(self) -> float | None:
+        stats = self.coordinator.data.get("interface_stats", {})
+        iface_stats = stats.get(self._iface_name, {})
+        rxbytes = iface_stats.get("rxbytes", 0)
+        if rxbytes:
+            return round(float(rxbytes) / (1024 ** 3), 2)
+        return 0.0
+
+
+class KeeneticLanTxSensor(ControllerEntity, SensorEntity):
+    """LAN (GigabitEthernet0) TX sensor."""
+    _attr_translation_key = "lan_tx"
+    _attr_icon = "mdi:upload-network"
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
+        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
+        self._iface_name = "GigabitEthernet0"
+        self._label = "LAN"
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._entry_id}_lan_tx"
+
+    @property
+    def name(self) -> str:
+        return f"{self._label} TX"
+
+    @property
+    def native_value(self) -> float | None:
+        stats = self.coordinator.data.get("interface_stats", {})
+        iface_stats = stats.get(self._iface_name, {})
+        txbytes = iface_stats.get("txbytes", 0)
+        if txbytes:
+            return round(float(txbytes) / (1024 ** 3), 2)
+        return 0.0
+
+
+class KeeneticWanRxSensor(ControllerEntity, SensorEntity):
+    """WAN (GigabitEthernet1/ISP) RX sensor."""
+    _attr_translation_key = "wan_rx"
+    _attr_icon = "mdi:download-network"
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
+        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
+        self._iface_name = "GigabitEthernet1"
+        self._label = "WAN"
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._entry_id}_wan_rx"
+
+    @property
+    def name(self) -> str:
+        return f"{self._label} RX"
+
+    @property
+    def native_value(self) -> float | None:
+        stats = self.coordinator.data.get("interface_stats", {})
+        iface_stats = stats.get(self._iface_name, {})
+        rxbytes = iface_stats.get("rxbytes", 0)
+        if rxbytes:
+            return round(float(rxbytes) / (1024 ** 3), 2)
+        return 0.0
+
+
+class KeeneticWanTxSensor(ControllerEntity, SensorEntity):
+    """WAN (GigabitEthernet1/ISP) TX sensor."""
+    _attr_translation_key = "wan_tx"
+    _attr_icon = "mdi:upload-network"
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
+        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
+        self._iface_name = "GigabitEthernet1"
+        self._label = "WAN"
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._entry_id}_wan_tx"
+
+    @property
+    def name(self) -> str:
+        return f"{self._label} TX"
+
+    @property
+    def native_value(self) -> float | None:
+        stats = self.coordinator.data.get("interface_stats", {})
+        iface_stats = stats.get(self._iface_name, {})
+        txbytes = iface_stats.get("txbytes", 0)
+        if txbytes:
+            return round(float(txbytes) / (1024 ** 3), 2)
+        return 0.0

@@ -952,9 +952,9 @@ class KeeneticClient:
         try:
             if interfaces is None:
                 interfaces = await self.async_get_interfaces()
+            
             iface_list = self._normalize_interfaces(interfaces)
-
-            WAN_KEYWORDS = ("wan", "internet", "pppoe", "isp")
+            WAN_KEYWORDS = ("wan", "internet", "pppoe", "isp", "provider")
 
             for iface in iface_list:
                 name_fields = [
@@ -968,22 +968,90 @@ class KeeneticClient:
                 name_joined = " ".join(str(v) for v in name_fields if v).lower()
                 state = str(iface.get("state") or "").lower()
 
+                # Ищем WAN интерфейс
                 if state == "up" and any(k in name_joined for k in WAN_KEYWORDS):
-                    # Traffic counters
-                    stats["total_rx"] = iface.get("rxbytes") or iface.get("rx-bytes") or 0
-                    stats["total_tx"] = iface.get("txbytes") or iface.get("tx-bytes") or 0
+                    # Traffic counters - пробуем разные ключи
+                    stats["total_rx"] = (
+                        iface.get("rxbytes") or 
+                        iface.get("rx-bytes") or 
+                        iface.get("bytes-rx") or 
+                        iface.get("rx") or 
+                        0
+                    )
+                    stats["total_tx"] = (
+                        iface.get("txbytes") or 
+                        iface.get("tx-bytes") or 
+                        iface.get("bytes-tx") or 
+                        iface.get("tx") or 
+                        0
+                    )
                     
                     # Speed (bits per second -> MB/s)
-                    rx_speed = iface.get("rx-speed") or iface.get("rxspeed") or 0
-                    tx_speed = iface.get("tx-speed") or iface.get("txspeed") or 0
+                    # Пробуем разные ключи для скорости
+                    rx_speed = (
+                        iface.get("rx-speed") or 
+                        iface.get("rxspeed") or 
+                        iface.get("speed-rx") or 
+                        iface.get("rx_rate") or 
+                        0
+                    )
+                    tx_speed = (
+                        iface.get("tx-speed") or 
+                        iface.get("txspeed") or 
+                        iface.get("speed-tx") or 
+                        iface.get("tx_rate") or 
+                        0
+                    )
+                    
+                    # Конвертация бит/сек -> Мбит/сек
                     stats["download_speed"] = round(float(rx_speed) / 8 / 1024 / 1024, 2)
                     stats["upload_speed"] = round(float(tx_speed) / 8 / 1024 / 1024, 2)
+                    
+                    _LOGGER.debug(
+                        "Traffic stats for %s: rx=%s, tx=%s, rx_speed=%s, tx_speed=%s",
+                        name_joined, stats["total_rx"], stats["total_tx"],
+                        stats["download_speed"], stats["upload_speed"]
+                    )
                     break
 
         except Exception as err:
             _LOGGER.debug("Error getting traffic stats: %s", err)
 
         return stats
+
+    async def async_get_all_interface_stats(self) -> Dict[str, Dict[str, Any]]:
+        """Get traffic statistics for all interfaces.
+        
+        Returns dict mapping interface name to stats (rxbytes, txbytes, etc.)
+        """
+        interfaces = await self.async_get_interfaces()
+        iface_list = self._normalize_interfaces(interfaces)
+        
+        all_stats: Dict[str, Dict[str, Any]] = {}
+        
+        for iface in iface_list:
+            iface_name = iface.get("id") or iface.get("interface-name")
+            if not iface_name:
+                continue
+            
+            # Пропускаем внутренние интерфейсы (Bridge, Vlan, AccessPoint)
+            iface_type = iface.get("type", "").lower()
+            if iface_type in ("bridge", "vlan", "accesspoint"):
+                continue
+            
+            try:
+                stats = await self.async_get_interface_stat(iface_name)
+                if stats:
+                    # Добавляем информацию об интерфейсе
+                    stats["interface_name"] = iface_name
+                    stats["interface_type"] = iface_type
+                    stats["link"] = iface.get("link")
+                    stats["state"] = iface.get("state")
+                    all_stats[iface_name] = stats
+            except Exception as err:
+                _LOGGER.debug("Failed to get stats for %s: %s", iface_name, err)
+        
+        return all_stats
 
     async def async_get_usb_storage(self) -> List[Dict[str, Any]]:
         """Get USB storage devices information.

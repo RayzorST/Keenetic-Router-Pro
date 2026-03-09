@@ -51,6 +51,8 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         wireguard = await self.client.async_get_wireguard_status(interfaces=interfaces)
         vpn_tunnels = await self.client.async_get_vpn_tunnels(interfaces=interfaces)
         clients = await self.client.async_get_clients()
+
+        interface_stats = await self.client.async_get_all_interface_stats()
         
         # Yeni veriler
         wan_status = await self.client.async_get_wan_status(interfaces=interfaces)
@@ -93,6 +95,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         return {
             "system": merged_system,
+            "traffic_stats": traffic_stats,
             "interfaces": interfaces,
             "wifi": wifi,
             "wireguard": wireguard,
@@ -100,7 +103,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "clients": clients,
             "wan_status": wan_status,
             "mesh_nodes": mesh_nodes,
-            "traffic_stats": traffic_stats,
+            "interface_stats": interface_stats,
             "client_stats": client_stats,
             "host_policies": host_policies,
             "usb_storage": usb_storage,
