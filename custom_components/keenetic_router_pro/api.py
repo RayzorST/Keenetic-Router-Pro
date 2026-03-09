@@ -254,6 +254,11 @@ class KeeneticClient:
         """Return basic system info: hostname, version, cpu, memory, uptime, etc."""
         data = await self._rci_get("show/system")
         return data or {}
+    
+    async def async_get_version_info(self) -> Dict[str, Any]:
+        """Return version info"""
+        data = await self._rci_get("show/version")
+        return data or {}
 
     async def async_get_interfaces(self) -> Dict[str, Any]:
         """Return raw interfaces dictionary from /rci/show/interface."""

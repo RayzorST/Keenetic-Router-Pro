@@ -21,8 +21,57 @@ class ControllerEntity(CoordinatorEntity):
         self._title = title
     
     @property
+    def _version_data(self) -> Dict[str, Any]:
+        """Получить данные версии из /rci/show/version."""
+        # Данные из coordinator.data["system"] — это ответ от /rci/show/version
+        return self.coordinator.data.get("system", {}) or {}
+    
+    @property
+    def _firmware_version(self) -> Optional[str]:
+        """Получить версию прошивки.
+        
+        Данные приходят из merged system+version в coordinator.data["system"]
+        """
+        version = self.coordinator.data.get("system", {}) or {}
+        
+        if version.get("title"):
+            return str(version["title"])
+        if version.get("release"):
+            return str(version["release"])
+        
+        ndw4 = version.get("ndw4", {})
+        if isinstance(ndw4, dict) and ndw4.get("version"):
+            return str(ndw4["version"])
+        
+        return None
+
+    @property
+    def _model_name(self) -> Optional[str]:
+        """Получить модель роутера.
+        
+        Приоритет: model > description > device > hw_id
+        """
+        version = self.coordinator.data.get("system", {}) or {}
+        
+        if version.get("model"):
+            return str(version["model"])
+        if version.get("description"):
+            return str(version["description"])
+        if version.get("device"):
+            return str(version["device"])
+        if version.get("hw_id"):
+            return str(version["hw_id"])
+        
+        return None
+    
+    @property
     def device_info(self) -> DeviceInfo:
-        return get_main_device_info(self._title, self._entry_id)
+        return get_main_device_info(
+            self._title, 
+            self._entry_id,
+            self._firmware_version,
+            self._model_name,
+        )
 
 
 class MeshEntity(CoordinatorEntity):

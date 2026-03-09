@@ -41,6 +41,8 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_update_data(self) -> dict[str, Any]:
         """Router'dan verileri çek."""
         system = await self.client.async_get_system_info()
+        version = await self.client.async_get_version_info()
+        merged_system = {**system, **version}
 
         # Interface verisini bir kez çek, tüm metotlara paylaştır
         interfaces = await self.client.async_get_interfaces()
@@ -90,7 +92,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         new_macs = current_macs - previous_macs
 
         return {
-            "system": system,
+            "system": merged_system,
             "interfaces": interfaces,
             "wifi": wifi,
             "wireguard": wireguard,

@@ -39,7 +39,6 @@ async def async_setup_entry(
     for node in mesh_nodes:
         node_cid = node.get("cid") or node.get("id")
         if node_cid:
-            entities.append(KeeneticMeshFirmwareSensor(coordinator, entry, node_cid))
             entities.append(KeeneticMeshUptimeSensor(coordinator, entry, node_cid))
             entities.append(KeeneticMeshClientsSensor(coordinator, entry, node_cid))
 
@@ -675,57 +674,6 @@ class KeeneticUsbStorageSensor(ControllerEntity, SensorEntity):
             "used_gb": round(float(used) / (1024 ** 3), 2),
             "free_gb": round(float(free) / (1024 ** 3), 2),
             "percent_used": percent_used,
-        }
-
-
-class KeeneticMeshFirmwareSensor(MeshEntity, SensorEntity):
-    """Mesh node firmware güncelleme sensörü."""
-    _attr_has_entity_name = True
-    _attr_translation_key = "mesh_firmware"
-    _attr_icon = "mdi:update"
-
-    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry, node_cid: str) -> None:
-        MeshEntity.__init__(self, coordinator, entry.entry_id, entry.title, node_cid)
-
-    @property
-    def unique_id(self) -> str:
-        safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
-        return f"{self._entry_id}_mesh_{safe_cid}_firmware"
-
-    @property
-    def name(self) -> str:
-        node = self._node
-        if node:
-            node_name = node.get("name") or node.get("mac") or self._node_cid
-            return f"Mesh - {node_name} Firmware"
-        return f"Mesh - {self._node_cid} Firmware"
-
-    @property
-    def native_value(self) -> str | None:
-        node = self._node
-        if node:
-            return node.get("firmware")
-        return None
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
-        node = self._node
-        if not node:
-            return None
-        
-        current = node.get("firmware")
-        available = node.get("firmware_available")
-        
-        update_available = False
-        if current and available and current != available:
-            update_available = True
-        
-        return {
-            "cid": self._node_cid,
-            "model": node.get("model"),
-            "current_version": current,
-            "available_version": available,
-            "update_available": update_available,
         }
 
 

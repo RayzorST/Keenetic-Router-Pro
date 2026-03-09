@@ -3,13 +3,14 @@ from typing import Any, Dict, Optional
 from .const import DOMAIN
 
 
-def get_main_device_info(title: str, entry_id: str) -> Dict[str, Any]:
+def get_main_device_info(title: str, entry_id: str, firmware_version: str, model: str) -> Dict[str, Any]:
     """Device info для главного роутера."""
     return {
         "identifiers": {(DOMAIN, entry_id)},
         "name": title,
         "manufacturer": "Keenetic",
-        "model": "Router",
+        "model": model or "Controller",
+        "sw_version": firmware_version,
     }
 
 
