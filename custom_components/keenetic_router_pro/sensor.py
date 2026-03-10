@@ -36,6 +36,7 @@ async def async_setup_entry(
     entities.append(KeeneticMemoryUsageSensor(coordinator, entry))
     entities.append(KeeneticUptimeSensor(coordinator, entry))
     entities.append(KeeneticWanStatusSensor(coordinator, entry))
+    entities.append(KeeneticFirmwareVersionSensor(coordinator, entry))
 
     # Yeni sensörler
     entities.append(KeeneticWanIpSensor(coordinator, entry))
@@ -70,6 +71,7 @@ async def async_setup_entry(
         if node_cid:
             entities.append(KeeneticMeshUptimeSensor(coordinator, entry, node_cid))
             entities.append(KeeneticMeshClientsSensor(coordinator, entry, node_cid))
+            entities.append(KeeneticMeshFirmwareVersionSensor(coordinator, entry, node_cid))
 
     # WireGuard profilleri için sensörler
     wg_profiles = coordinator.data.get("wireguard", {}).get("profiles", {})
@@ -230,7 +232,13 @@ class KeeneticUptimeSensor(ControllerEntity, SensorEntity):
 
 
 class KeeneticWanStatusSensor(ControllerEntity, SensorEntity):
-    """Basit WAN bağlantı durumu sensörü (up/down)."""
+    """WAN bağlantı durumu sensörü.
+
+    Durum değerleri:
+      - "connected" → link up VE IP mevcut (gerçek internet bağlantısı)
+      - "link_up"   → link up AMA IP yok (ISP sorunu / DHCP bekleniyor)
+      - "down"      → interface kapalı veya bulunamadı
+    """
     _attr_has_entity_name = True
     _attr_translation_key = "wan_status"
 
@@ -247,36 +255,33 @@ class KeeneticWanStatusSensor(ControllerEntity, SensorEntity):
 
     @property
     def native_value(self) -> str | None:
-        interfaces = self.coordinator.data.get("interfaces") or {}
+        wan = self.coordinator.data.get("wan_status", {})
+        return wan.get("status", "down")
 
-        if isinstance(interfaces, dict):
-            iface_list = list(interfaces.values())
-        elif isinstance(interfaces, list):
-            iface_list = interfaces
-        else:
-            iface_list = []
+    @property
+    def icon(self) -> str:
+        status = self.native_value
+        if status == "connected":
+            return "mdi:web-check"
+        if status == "link_up":
+            return "mdi:web-remove"
+        return "mdi:web-off"
 
-        if not iface_list:
-            return "down"
-
-        WAN_KEYWORDS = ("wan", "internet", "pppoe", "isp")
-
-        for iface in iface_list:
-            state = str(iface.get("state") or "").lower()
-            name_fields = [
-                iface.get("name"),
-                iface.get("ifname"),
-                iface.get("id"),
-                iface.get("interface-name"),
-                iface.get("description"),
-                iface.get("type"),
-            ]
-            name_joined = " ".join(str(v) for v in name_fields if v).lower()
-
-            if state == "up" and any(k in name_joined for k in WAN_KEYWORDS):
-                return "up"
-
-        return "down"
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        wan = self.coordinator.data.get("wan_status", {})
+        attrs: dict[str, Any] = {}
+        if wan.get("interface"):
+            attrs["interface"] = wan["interface"]
+        if wan.get("type"):
+            attrs["type"] = wan["type"]
+        if wan.get("ip"):
+            attrs["ip"] = wan["ip"]
+        if wan.get("gateway"):
+            attrs["gateway"] = wan["gateway"]
+        if wan.get("link"):
+            attrs["link"] = wan["link"]
+        return attrs if attrs else None
 
 
 class _BaseWgSensor(ControllerEntity, SensorEntity):
@@ -1320,3 +1325,84 @@ class KeeneticWanTxSensor(ControllerEntity, SensorEntity):
         if txbytes:
             return round(float(txbytes) / (1024 ** 3), 2)
         return 0.0
+
+class KeeneticFirmwareVersionSensor(ControllerEntity, SensorEntity):
+    """Current firmware version sensor for the main router."""
+    _attr_has_entity_name = True
+    _attr_translation_key = "firmware_version"
+    _attr_icon = "mdi:package-variant-closed"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
+        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._entry_id}_firmware_version"
+
+    @property
+    def name(self) -> str:
+        return "Firmware Version"
+
+    @property
+    def native_value(self) -> str | None:
+        return self._firmware_version
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        system = self.coordinator.data.get("system", {}) or {}
+        attrs: dict[str, Any] = {}
+        if system.get("release"):
+            attrs["release"] = system["release"]
+        if system.get("fw-update-sandbox"):
+            attrs["channel"] = system["fw-update-sandbox"]
+        if system.get("arch"):
+            attrs["architecture"] = system["arch"]
+        ndm = system.get("ndm")
+        if isinstance(ndm, dict) and ndm.get("exact"):
+            attrs["ndm_version"] = ndm["exact"]
+        bsp = system.get("bsp")
+        if isinstance(bsp, dict) and bsp.get("exact"):
+            attrs["bsp_version"] = bsp["exact"]
+        return attrs if attrs else None
+
+
+class KeeneticMeshFirmwareVersionSensor(MeshEntity, SensorEntity):
+    """Current firmware version sensor for a mesh node."""
+    _attr_has_entity_name = True
+    _attr_translation_key = "mesh_firmware_version"
+    _attr_icon = "mdi:package-variant-closed"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry, node_cid: str) -> None:
+        MeshEntity.__init__(self, coordinator, entry.entry_id, entry.title, node_cid)
+
+    @property
+    def unique_id(self) -> str:
+        safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
+        return f"{safe_cid}_firmware_version"
+
+    @property
+    def name(self) -> str:
+        return "Firmware Version"
+
+    @property
+    def native_value(self) -> str | None:
+        node = self._node
+        if node:
+            return node.get("firmware")
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        node = self._node
+        if not node:
+            return None
+        attrs: dict[str, Any] = {}
+        if node.get("firmware_available"):
+            attrs["firmware_available"] = node["firmware_available"]
+        if node.get("hw_id"):
+            attrs["hardware_id"] = node["hw_id"]
+        if node.get("model"):
+            attrs["model"] = node["model"]
+        return attrs if attrs else None

@@ -187,10 +187,21 @@ class KeeneticClient:
         return await self._rci_post("parse", command, allow_text=True)
 
     def _normalize_interfaces(self, raw: Any) -> List[Dict[str, Any]]:
-        """Raw /rci/show/interface çıktısını evrensel listeye çevir."""
+        """Raw /rci/show/interface çıktısını evrensel listeye çevir.
+
+        Dict anahtarları (ör. "ISP", "GigabitEthernet0") interface'in adıdır.
+        Kaybolmaması için, içeride "id" yoksa anahtar adı enjekte edilir.
+        """
         if isinstance(raw, dict):
             # {"GigabitEthernet0": {...}, "WifiMaster0/AccessPoint0": {...}}
-            return [v for v in raw.values() if isinstance(v, dict)]
+            result = []
+            for key, val in raw.items():
+                if not isinstance(val, dict):
+                    continue
+                if "id" not in val:
+                    val = {**val, "id": key}
+                result.append(val)
+            return result
         if isinstance(raw, list):
             # [ {...}, {...} ]
             return [v for v in raw if isinstance(v, dict)]
@@ -636,33 +647,90 @@ class KeeneticClient:
         self, interfaces: Dict[str, Any] | None = None
     ) -> Dict[str, Any]:
         """Get WAN interface status including external IP address.
-        
+
         PPPoE bağlantısı varsa oradan, yoksa WAN interface'inden IP alır.
+
+        Durum mantığı:
+          - "connected"  → interface up VE IP mevcut
+          - "link_up"    → interface up AMA IP yok (ISP sorunu vb.)
+          - "down"       → interface bulunamadı veya down
         """
         if interfaces is None:
             interfaces = await self.async_get_interfaces()
         iface_list = self._normalize_interfaces(interfaces)
 
-        # Önce PPPoE ara (öncelikli)
-        for iface in iface_list:
-            itype = str(iface.get("type") or "").lower()
-            state = str(iface.get("state") or "").lower()
-            
-            if itype == "pppoe" and state == "up":
-                return {
-                    "status": "up",
-                    "ip": iface.get("address"),
-                    "interface": iface.get("id") or iface.get("interface-name"),
-                    "uptime": iface.get("uptime"),
-                    "gateway": iface.get("remote"),
-                    "type": "pppoe",
-                }
+        # ---------- yardımcı: interface'den IP çıkar ----------
+        def _extract_ip(iface: Dict[str, Any]) -> str | None:
+            """Try every known Keenetic address field/format."""
+            # 1) global-address (Keenetic 4.x+)
+            gaddr = iface.get("global-address")
+            if isinstance(gaddr, list) and gaddr:
+                first = gaddr[0]
+                if isinstance(first, dict):
+                    ip = first.get("address") or first.get("ip")
+                    if ip:
+                        return str(ip).split("/")[0]
+                elif isinstance(first, str):
+                    return first.split("/")[0]
 
-        WAN_KEYWORDS = ("wan", "internet", "isp")
+            # 2) address alanı
+            address = iface.get("address")
+            if isinstance(address, list) and address:
+                first = address[0]
+                if isinstance(first, dict):
+                    ip = first.get("address") or first.get("ip")
+                    if ip:
+                        return str(ip).split("/")[0]
+                elif isinstance(first, str):
+                    return first.split("/")[0]
+            elif isinstance(address, str) and address:
+                return address.split("/")[0]
 
-        for iface in iface_list:
-            state = str(iface.get("state") or "").lower()
-            
+            # 3) doğrudan ip / ipv4 alanı
+            for key in ("ip", "ipv4", "ip-address"):
+                val = iface.get(key)
+                if val and isinstance(val, str):
+                    return val.split("/")[0]
+
+            return None
+
+        # ---------- yardımcı: sonuç oluştur ----------
+        def _build_result(
+            iface: Dict[str, Any], wan_type: str
+        ) -> Dict[str, Any]:
+            wan_ip = _extract_ip(iface)
+            link_state = str(iface.get("state") or "").lower()
+            status = "connected" if (link_state == "up" and wan_ip) else (
+                "link_up" if link_state == "up" else "down"
+            )
+            return {
+                "status": status,
+                "ip": wan_ip,
+                "interface": iface.get("id") or iface.get("interface-name"),
+                "uptime": iface.get("uptime"),
+                "gateway": (
+                    iface.get("gateway")
+                    or iface.get("remote")
+                    or iface.get("default-gateway")
+                ),
+                "type": wan_type,
+                "link": link_state,
+            }
+
+        # ---------- yardımcı: WAN keyword eşleşmesi ----------
+        WAN_KEYWORDS = ("wan", "internet", "isp", "broadband")
+
+        def _is_wan_iface(iface: Dict[str, Any]) -> bool:
+            """Interface'in WAN olup olmadığını birden fazla ipucuyla belirle."""
+            # security-level: public → Keenetic'te WAN demek
+            sec = str(iface.get("security-level") or "").lower()
+            if sec == "public":
+                return True
+            # role: inet
+            role = str(iface.get("role") or "").lower()
+            if role in ("inet", "internet", "wan"):
+                return True
+            # İsim tabanlı arama
             name_fields = [
                 iface.get("name"),
                 iface.get("ifname"),
@@ -672,26 +740,27 @@ class KeeneticClient:
                 iface.get("type"),
             ]
             name_joined = " ".join(str(v) for v in name_fields if v).lower()
+            return any(k in name_joined for k in WAN_KEYWORDS)
 
-            if state == "up" and any(k in name_joined for k in WAN_KEYWORDS):
-                address = iface.get("address")
-                if isinstance(address, list) and address:
-                    wan_ip = address[0].get("address") if isinstance(address[0], dict) else str(address[0])
-                elif isinstance(address, str):
-                    wan_ip = address
-                else:
-                    wan_ip = iface.get("ip") or iface.get("ipv4") or None
+        # ========== 1) PPPoE (öncelikli) ==========
+        for iface in iface_list:
+            itype = str(iface.get("type") or "").lower()
+            state = str(iface.get("state") or "").lower()
+            if itype == "pppoe" and state == "up":
+                return _build_result(iface, "pppoe")
 
-                return {
-                    "status": "up",
-                    "ip": wan_ip,
-                    "interface": iface.get("id") or iface.get("interface-name"),
-                    "uptime": iface.get("uptime"),
-                    "gateway": iface.get("gateway"),
-                    "type": "ethernet",
-                }
+        # ========== 2) WAN interface (state == "up") ==========
+        for iface in iface_list:
+            state = str(iface.get("state") or "").lower()
+            if state == "up" and _is_wan_iface(iface):
+                return _build_result(iface, "ethernet")
 
-        return {"status": "down", "ip": None}
+        # ========== 3) WAN interface (state != "up" — link_up/down) ==========
+        for iface in iface_list:
+            if _is_wan_iface(iface):
+                return _build_result(iface, "ethernet")
+
+        return {"status": "down", "ip": None, "link": "down"}
 
 
     async def async_get_mesh_nodes(self) -> List[Dict[str, Any]]:
