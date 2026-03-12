@@ -544,10 +544,6 @@ class KeeneticConnectedClientsSensor(ControllerEntity, SensorEntity):
         return stats.get("connected", 0)
 
     @property
-    def native_unit_of_measurement(self) -> str:
-        return "conn"
-
-    @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         stats = self.coordinator.data.get("client_stats", {})
         return {
@@ -577,10 +573,6 @@ class KeeneticDisconnectedClientsSensor(ControllerEntity, SensorEntity):
     def native_value(self) -> int:
         stats = self.coordinator.data.get("client_stats", {})
         return stats.get("disconnected", 0)
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        return "conn"
 
 
 class KeeneticExtenderCountSensor(ControllerEntity, SensorEntity):
