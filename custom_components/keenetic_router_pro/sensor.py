@@ -838,7 +838,6 @@ class KeeneticMeshClientsSensor(MeshEntity, SensorEntity):
     _attr_translation_key = "mesh_clients"
     _attr_icon = "mdi:account-group"
     _attr_state_class = "measurement"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry, node_cid: str) -> None:
         MeshEntity.__init__(self, coordinator, entry.entry_id, entry.title, node_cid)
