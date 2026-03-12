@@ -59,6 +59,7 @@ async def async_setup_entry(
 class KeeneticClientTracker(ControllerEntity, ScannerEntity):
     """Device tracker entity representing a tracked client."""
     _attr_should_poll = False
+    _attr_entity_category = None  # Diagnostic altında değil, ayrı göster
 
     def __init__(
         self,
