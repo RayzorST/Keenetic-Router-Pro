@@ -90,17 +90,9 @@ An advanced Home Assistant integration for Keenetic routers. Provides mesh netwo
 
 ## 📦 Installation
 
-### Via HACS (Recommended)
+### Via HACS
 
-1. HACS > Integrations > ⋮ > Custom repositories
-2. URL: `https://github.com/YOUR_USERNAME/keenetic_router_pro`
-3. Category: Integration
-4. Search for "Keenetic Router Pro" and install
-5. Restart Home Assistant
-
-### Manual Installation
-
-1. Copy the `keenetic_router_pro` folder into `config/custom_components/`
+1. Search for "Keenetic Router Pro" and install
 2. Restart Home Assistant
 
 ---
