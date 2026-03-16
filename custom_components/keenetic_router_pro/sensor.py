@@ -1,6 +1,6 @@
 """Sensors for Keenetic Router Pro."""
 from __future__ import annotations
-from typing import Any
+from typing import Any, Optional
 from homeassistant.components.sensor import (
     SensorEntity,
     SensorDeviceClass,
@@ -16,9 +16,10 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from .const import DOMAIN, DATA_COORDINATOR, CONF_TRACKED_CLIENTS
+from .const import DOMAIN, DATA_COORDINATOR, CONF_TRACKED_CLIENTS, DATA_CLIENT
 from .coordinator import KeeneticCoordinator
 from .entity import ControllerEntity, MeshEntity
+from . import KeeneticClient
 
 
 async def async_setup_entry(
@@ -29,6 +30,7 @@ async def async_setup_entry(
     """Set up Keenetic Router Pro sensors from a config entry."""
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator: KeeneticCoordinator = data[DATA_COORDINATOR]
+    client: Optional[KeeneticClient] = data.get(DATA_CLIENT)
     entities: list[SensorEntity] = []
 
     # Temel sistem sensörleri
@@ -49,6 +51,13 @@ async def async_setup_entry(
     entities.append(KeeneticWifi24TemperatureSensor(coordinator, entry))
     entities.append(KeeneticWifi5TemperatureSensor(coordinator, entry))
 
+    if client:
+        entities.append(KeeneticLocalIpSensor(coordinator, entry, client._host))
+    else:
+        # Если клиента нет, пытаемся получить IP из coordinator или используем fallback
+        host = entry.data.get("host", "unknown")
+        entities.append(KeeneticLocalIpSensor(coordinator, entry, host))
+
     # WiFi 2.4GHz
     entities.append(KeeneticWifi24RxSensor(coordinator, entry))
     entities.append(KeeneticWifi24TxSensor(coordinator, entry))
@@ -68,10 +77,13 @@ async def async_setup_entry(
     mesh_nodes = coordinator.data.get("mesh_nodes", [])
     for node in mesh_nodes:
         node_cid = node.get("cid") or node.get("id")
+        node_ip = node.get("ip")
         if node_cid:
             entities.append(KeeneticMeshUptimeSensor(coordinator, entry, node_cid))
             entities.append(KeeneticMeshClientsSensor(coordinator, entry, node_cid))
             entities.append(KeeneticMeshFirmwareVersionSensor(coordinator, entry, node_cid))
+            if node_cid and node_ip:
+                entities.append(KeeneticMeshLocalIpSensor(coordinator, entry, node_cid, node_ip))
 
     # WireGuard profilleri için sensörler
     wg_profiles = coordinator.data.get("wireguard", {}).get("profiles", {})
@@ -1406,3 +1418,61 @@ class KeeneticMeshFirmwareVersionSensor(MeshEntity, SensorEntity):
         if node.get("model"):
             attrs["model"] = node["model"]
         return attrs if attrs else None
+
+class KeeneticLocalIpSensor(ControllerEntity, SensorEntity):
+    """Sensor for local IP address of the router/device."""
+    _attr_has_entity_name = True
+    _attr_translation_key = "local_ip"
+    _attr_icon = "mdi:ip-network"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry, ip_address: str) -> None:
+        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
+        self._ip_address = ip_address
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._entry_id}_local_ip"
+
+    @property
+    def name(self) -> str:
+        return "Local IP Address"
+
+    @property
+    def native_value(self) -> str | None:
+        return self._ip_address
+
+
+class KeeneticMeshLocalIpSensor(MeshEntity, SensorEntity):
+    """Sensor for local IP address of a mesh node."""
+    _attr_has_entity_name = True
+    _attr_translation_key = "mesh_local_ip"
+    _attr_icon = "mdi:ip-network"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self, 
+        coordinator: KeeneticCoordinator, 
+        entry: ConfigEntry, 
+        node_cid: str,
+        ip_address: str,
+    ) -> None:
+        MeshEntity.__init__(self, coordinator, entry.entry_id, entry.title, node_cid)
+        self._ip_address = ip_address
+
+    @property
+    def unique_id(self) -> str:
+        safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
+        return f"{safe_cid}_local_ip"
+
+    @property
+    def name(self) -> str:
+        return "Local IP Address"
+
+    @property
+    def native_value(self) -> str | None:
+        # Если IP изменился, берем актуальный из данных ноды
+        node = self._node
+        if node and node.get("ip"):
+            return node.get("ip")
+        return self._ip_address

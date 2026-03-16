@@ -1562,3 +1562,48 @@ class KeeneticClient:
             }
         except Exception:
             return {}
+        
+    async def async_get_ndns_info(self) -> Dict[str, Any]:
+        """Get NDNS (Dynamic DNS) information from /rci/show/ndns.
+        
+        Returns detailed information about NDNS configuration and tunnels.
+        Example response includes:
+        - name: Hostname
+        - domain: Domain name
+        - access: Access type (cloud, etc.)
+        - ttp: Tunnel information with tunnel list
+        - updated: Last update status
+        - address/address6: IP addresses
+        """
+        try:
+            data = await self._rci_get("show/ndns")
+            if not data:
+                return {}
+            
+            # Ensure we always return a dict
+            result = dict(data) if isinstance(data, dict) else {}
+            
+            # Parse tunnel information if present
+            if "ttp" in result and isinstance(result["ttp"], dict):
+                ttp = result["ttp"]
+                # Ensure tunnel list is properly formatted
+                if "tunnel" in ttp and isinstance(ttp["tunnel"], list):
+                    tunnels = []
+                    for tunnel in ttp["tunnel"]:
+                        if isinstance(tunnel, dict):
+                            # Convert string numbers to int where appropriate
+                            for key in ["uptime", "idle", "timeout", "linger"]:
+                                if key in tunnel and tunnel[key] is not None:
+                                    try:
+                                        tunnel[key] = int(tunnel[key])
+                                    except (ValueError, TypeError):
+                                        pass
+                            tunnels.append(tunnel)
+                    ttp["tunnel"] = tunnels
+            
+            _LOGGER.debug("NDNS info retrieved: %s", result)
+            return result
+            
+        except Exception as err:
+            _LOGGER.debug("Error getting NDNS info: %s", err)
+            return {}
