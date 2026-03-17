@@ -275,8 +275,6 @@ Each mesh node appears as a separate device in Home Assistant with the following
 | WiFi 2.4GHz RX / TX | Cumulative traffic in GB | Diagnostic |
 | WiFi 5GHz RX / TX | Cumulative traffic in GB | Diagnostic |
 | LAN RX / TX | Cumulative traffic in GB | Diagnostic |
-| WiFi 2.4GHz Temperature | Radio module temperature | Diagnostic |
-| WiFi 5GHz Temperature | Radio module temperature | Diagnostic |
 
 > **Note:** Traffic and temperature sensors are only created for interfaces that exist on the node. Not all extenders have all interfaces.
 
