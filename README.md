@@ -271,10 +271,6 @@ Each mesh node appears as a separate device in Home Assistant with the following
 | Uptime | Node uptime in seconds | — |
 | Clients | Number of associated clients | — |
 | Firmware Version | Current firmware with hardware ID and model details | Diagnostic |
-| USB Storage | USB device info (if connected) | Diagnostic |
-| WiFi 2.4GHz RX / TX | Cumulative traffic in GB | Diagnostic |
-| WiFi 5GHz RX / TX | Cumulative traffic in GB | Diagnostic |
-| LAN RX / TX | Cumulative traffic in GB | Diagnostic |
 
 > **Note:** Traffic and temperature sensors are only created for interfaces that exist on the node. Not all extenders have all interfaces.
 
