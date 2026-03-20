@@ -59,7 +59,6 @@ class KeeneticMeshRebootButton(MeshEntity, ButtonEntity):
     """Button to reboot a mesh/extender node."""
     _attr_has_entity_name = True
     _attr_icon = "mdi:restart"
-    _attr_translation_key = "mesh_reboot"
 
     def __init__(
         self,
@@ -75,6 +74,14 @@ class KeeneticMeshRebootButton(MeshEntity, ButtonEntity):
     def unique_id(self) -> str:
         safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
         return f"{safe_cid}_reboot_button"
+
+    @property
+    def name(self) -> str:
+        node = self._node
+        node_name = node.get("name") if node else None
+        if node_name:
+            return f"Reboot {node_name}"
+        return "Reboot"
 
     async def async_press(self, **_: Any) -> None:
         await self._client.async_reboot_mesh_node(self._node_cid)
