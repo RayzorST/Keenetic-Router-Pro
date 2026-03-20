@@ -83,7 +83,7 @@ async def async_setup_entry(
             entities.append(KeeneticMeshUptimeSensor(coordinator, entry, node_cid))
             entities.append(KeeneticMeshClientsSensor(coordinator, entry, node_cid))
             entities.append(KeeneticMeshFirmwareVersionSensor(coordinator, entry, node_cid))
-            if node_cid and node_ip:
+            if node_ip:
                 entities.append(KeeneticMeshLocalIpSensor(coordinator, entry, node_cid, node_ip))
 
     # WireGuard profilleri için sensörler
@@ -775,7 +775,6 @@ class KeeneticUsbStorageSensor(ControllerEntity, SensorEntity):
             "filesystem": device.get("filesystem"),
             "state": device.get("state"),
             "type": device.get("type"),
-            "port": device.get("port"),
             "usb_version": device.get("usb_version"),
             "ejectable": device.get("ejectable"),
             "power_control": device.get("power_control"),

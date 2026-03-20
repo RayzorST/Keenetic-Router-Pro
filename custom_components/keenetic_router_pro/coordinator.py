@@ -60,7 +60,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         traffic_stats = await self.client.async_get_traffic_stats(interfaces=interfaces)
         client_stats = await self.client.async_get_client_stats()
         host_policies = await self.client.async_get_host_policies()
-        ndns_info = await self._client.async_get_ndns_info()
+        ndns_info = await self.client.async_get_ndns_info()
 
         # Ana router USB
         usb_storage = await self.client.async_get_usb_storage()

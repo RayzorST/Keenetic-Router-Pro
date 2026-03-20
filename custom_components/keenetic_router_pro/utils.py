@@ -9,7 +9,6 @@ def get_main_device_info(
         firmware_version: str, 
         model: str,
         host: str,
-        port: int = 100,
         ssl: bool = False,
         ndns_domain: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -19,9 +18,9 @@ def get_main_device_info(
     if ndns_domain and ndns_domain.strip():
         # Убираем протокол если есть
         clean_domain = ndns_domain.replace("https://", "").replace("http://", "").split("/")[0]
-        configuration_url = f"{scheme}://{clean_domain}:{port}"
+        configuration_url = f"{scheme}://{clean_domain}"
     else:
-        configuration_url = f"{scheme}://{host}:{port}"
+        configuration_url = f"{scheme}://{host}"
 
     return {
         "identifiers": {(DOMAIN, entry_id)},
@@ -39,7 +38,6 @@ def get_mesh_device_info(
     node: Optional[Dict[str, Any]] = None,
     node_cid: Optional[str] = None,
     host: Optional[str] = None,
-    port: int = 100,
     ssl: bool = False,
 ) -> Dict[str, Any]:
     """Device info для Mesh-ноды (связано с главным роутером)."""
@@ -48,7 +46,7 @@ def get_mesh_device_info(
         node_ip = node.get("ip") or host
 
         scheme = "https" if ssl else "http"
-        configuration_url = f"{scheme}://{node_ip}:{port}" if node_ip else None
+        configuration_url = f"{scheme}://{node_ip}" if node_ip else None
 
         return {
             "identifiers": {(DOMAIN, f"mesh_{node_cid}")},
@@ -61,7 +59,7 @@ def get_mesh_device_info(
         }
     
     # Fallback к главному устройству
-    return get_main_device_info(title, entry_id, None, None, host, port, ssl)
+    return get_main_device_info(title, entry_id, None, None, host, ssl)
 
 
 def get_mesh_usb_device_info(
@@ -70,7 +68,6 @@ def get_mesh_usb_device_info(
     mesh_node_name: str,
     mesh_cid: Optional[str] = None,
     node_ip: Optional[str] = None,
-    port: int = 100,
     ssl: bool = False,
 ) -> Dict[str, Any]:
     """Device info для USB на Mesh-ноде."""
@@ -82,4 +79,4 @@ def get_mesh_usb_device_info(
             "via_device": (DOMAIN, entry_id),
         }
     # Fallback к главному устройству
-    return get_main_device_info(title, entry_id, None, None, node_ip, port, ssl)
+    return get_main_device_info(title, entry_id, None, None, node_ip, ssl)
