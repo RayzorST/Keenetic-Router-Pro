@@ -152,13 +152,13 @@ class KeeneticClient:
 
         # Extract session cookie from Set-Cookie header
         session_cookie: str | None = None
+        # Extract session cookie manually — HA's shared CookieJar(unsafe=False)
+        # silently ignores cookies from bare IP addresses.
         raw_cookie = get_resp.headers.get("Set-Cookie", "")
-        for part in raw_cookie.split(";"):
-            part = part.strip()
-            if part.lower().startswith("sysauth=") or part.lower().startswith("sysauth_http="):
-                session_cookie = part
-                break
-        # aiohttp also stores cookies in the session cookie jar automatically
+        if raw_cookie:
+            cookie_kv = raw_cookie.split(";")[0].strip()
+            if "=" in cookie_kv:
+                session_cookie = cookie_kv
 
         _LOGGER.debug("NDW2 session cookie: %s", session_cookie)
 
@@ -174,9 +174,11 @@ class KeeneticClient:
             "NDW2 hash: ha1(md5)=%s response(sha256)=%s", ha1, response_hash
         )
 
-        # --- Step 3: POST /auth with credentials ---
+        # --- Step 3: POST /auth with credentials + explicit Cookie header ---
         payload = {"login": self._username, "password": response_hash}
-        post_headers: Dict[str, str] = {"Content-Type": "application/json"}
+        post_headers: Dict[str, str] = {}
+        if session_cookie:
+            post_headers["Cookie"] = session_cookie
 
         _LOGGER.debug("NDW2 challenge: POST %s payload_login=%s", auth_url, self._username)
 
@@ -206,9 +208,8 @@ class KeeneticClient:
                 f"Challenge auth failed (status={post_resp.status}, body={post_text!r})"
             )
 
-        # aiohttp session cookie jar now holds the authenticated sysauth cookie.
-        # Subsequent requests via self._session will include it automatically.
-        self._auth_header = {}  # No Authorization header needed; cookie is used.
+        # Store cookie in _auth_header so every subsequent RCI request includes it.
+        self._auth_header = {"Cookie": session_cookie} if session_cookie else {}
         self._authenticated = True
 
         _LOGGER.debug(
