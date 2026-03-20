@@ -131,10 +131,6 @@ class KeeneticCpuLoadSensor(ControllerEntity, SensorEntity):
         return f"{self._entry_id}_cpu_load"
 
     @property
-    def name(self) -> str:
-        return "CPU Load"
-
-    @property
     def native_unit_of_measurement(self) -> str:
         return PERCENTAGE
 
@@ -164,10 +160,6 @@ class KeeneticMemoryUsageSensor(ControllerEntity, SensorEntity):
     @property
     def unique_id(self) -> str:
         return f"{self._entry_id}_mem_usage"
-
-    @property
-    def name(self) -> str:
-        return "Memory Usage"
 
     @property
     def native_unit_of_measurement(self) -> str:
@@ -220,10 +212,6 @@ class KeeneticUptimeSensor(ControllerEntity, SensorEntity):
         return f"{self._entry_id}_uptime"
 
     @property
-    def name(self) -> str:
-        return "Uptime"
-
-    @property
     def native_unit_of_measurement(self) -> str:
         return UnitOfTime.SECONDS
 
@@ -270,10 +258,6 @@ class KeeneticWanStatusSensor(ControllerEntity, SensorEntity):
     @property
     def unique_id(self) -> str:
         return f"{self._entry_id}_wan_status"
-
-    @property
-    def name(self) -> str:
-        return "WAN Status"
 
     @property
     def native_value(self) -> str | None:
@@ -473,10 +457,6 @@ class KeeneticPppoeUptimeSensor(ControllerEntity, SensorEntity):
         return f"{self._entry_id}_pppoe_uptime"
 
     @property
-    def name(self) -> str:
-        return "PPPoE Uptime"
-
-    @property
     def native_unit_of_measurement(self) -> str:
         return UnitOfTime.SECONDS
 
@@ -516,10 +496,6 @@ class KeeneticActiveConnectionsSensor(ControllerEntity, SensorEntity):
     @property
     def unique_id(self) -> str:
         return f"{self._entry_id}_active_connections"
-
-    @property
-    def name(self) -> str:
-        return "Active Connections"
 
     @property
     def native_value(self) -> int:
@@ -563,10 +539,6 @@ class KeeneticConnectedClientsSensor(ControllerEntity, SensorEntity):
         return f"{self._entry_id}_connected_clients"
 
     @property
-    def name(self) -> str:
-        return "Connected Clients"
-
-    @property
     def native_value(self) -> int:
         stats = self.coordinator.data.get("client_stats", {})
         return stats.get("connected", 0)
@@ -594,10 +566,6 @@ class KeeneticRouterClientsSensor(ControllerEntity, SensorEntity):
     @property
     def unique_id(self) -> str:
         return f"{self._entry_id}_router_clients"
-
-    @property
-    def name(self) -> str:
-        return "Clients"
 
     @property
     def native_value(self) -> int:
@@ -650,10 +618,6 @@ class KeeneticDisconnectedClientsSensor(ControllerEntity, SensorEntity):
         return f"{self._entry_id}_disconnected_clients"
 
     @property
-    def name(self) -> str:
-        return "Disconnected Clients"
-
-    @property
     def native_value(self) -> int:
         stats = self.coordinator.data.get("client_stats", {})
         return stats.get("disconnected", 0)
@@ -673,10 +637,6 @@ class KeeneticExtenderCountSensor(ControllerEntity, SensorEntity):
     @property
     def unique_id(self) -> str:
         return f"{self._entry_id}_extender_count"
-
-    @property
-    def name(self) -> str:
-        return "Extenders"
 
     @property
     def native_value(self) -> int:
@@ -889,10 +849,6 @@ class KeeneticMeshUptimeSensor(MeshEntity, SensorEntity):
         return f"{safe_cid}_uptime"
 
     @property
-    def name(self) -> str:
-        return f"Uptime"
-
-    @property
     def native_unit_of_measurement(self) -> str:
         return UnitOfTime.SECONDS
 
@@ -912,7 +868,7 @@ class KeeneticMeshUptimeSensor(MeshEntity, SensorEntity):
 class KeeneticMeshClientsSensor(MeshEntity, SensorEntity):
     """Mesh node active clients sensor."""
     _attr_has_entity_name = True
-    _attr_translation_key = "mesh_clients"
+    _attr_translation_key = "connected_clients"
     _attr_icon = "mdi:account-group"
     _attr_state_class = "measurement"
 
@@ -923,14 +879,6 @@ class KeeneticMeshClientsSensor(MeshEntity, SensorEntity):
     def unique_id(self) -> str:
         safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
         return f"{safe_cid}_clients"
-
-    @property
-    def name(self) -> str:
-        node = self._node
-        if node:
-            node_name = node.get("name") or node.get("mac") or self._node_cid
-            return f"Mesh - {node_name} Clients"
-        return f"Mesh - {self._node_cid} Clients"
 
     @property
     def native_value(self) -> int:
@@ -972,15 +920,11 @@ class KeeneticWifi24TemperatureSensor(ControllerEntity, SensorEntity):
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
         self._band = "2.4GHz"
-        self._interface_prefix = "WifiMaster0"  # Обычно 2.4GHz
+        self._interface_prefix = "WifiMaster0"
 
     @property
     def unique_id(self) -> str:
         return f"{self._entry_id}_wifi_24_temperature"
-
-    @property
-    def name(self) -> str:
-        return f"WiFi {self._band} Temperature"
 
     @property
     def native_value(self) -> float | None:
@@ -1016,15 +960,11 @@ class KeeneticWifi5TemperatureSensor(ControllerEntity, SensorEntity):
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
         self._band = "5GHz"
-        self._interface_prefix = "WifiMaster1"  # Обычно 5GHz
+        self._interface_prefix = "WifiMaster1"
 
     @property
     def unique_id(self) -> str:
         return f"{self._entry_id}_wifi_5_temperature"
-
-    @property
-    def name(self) -> str:
-        return f"WiFi {self._band} Temperature"
 
     @property
     def native_value(self) -> float | None:
@@ -1422,10 +1362,6 @@ class KeeneticFirmwareVersionSensor(ControllerEntity, SensorEntity):
         return f"{self._entry_id}_firmware_version"
 
     @property
-    def name(self) -> str:
-        return "Firmware Version"
-
-    @property
     def native_value(self) -> str | None:
         return self._firmware_version
 
@@ -1464,10 +1400,6 @@ class KeeneticMeshFirmwareVersionSensor(MeshEntity, SensorEntity):
         return f"{safe_cid}_firmware_version"
 
     @property
-    def name(self) -> str:
-        return "Firmware Version"
-
-    @property
     def native_value(self) -> str | None:
         node = self._node
         if node:
@@ -1491,7 +1423,7 @@ class KeeneticMeshFirmwareVersionSensor(MeshEntity, SensorEntity):
 class KeeneticLocalIpSensor(ControllerEntity, SensorEntity):
     """Sensor for local IP address of the router/device."""
     _attr_has_entity_name = True
-    _attr_translation_key = "local_ip"
+    _attr_name = "IP"
     _attr_icon = "mdi:ip-network"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -1504,10 +1436,6 @@ class KeeneticLocalIpSensor(ControllerEntity, SensorEntity):
         return f"{self._entry_id}_local_ip"
 
     @property
-    def name(self) -> str:
-        return "Local IP Address"
-
-    @property
     def native_value(self) -> str | None:
         return self._ip_address
 
@@ -1515,7 +1443,7 @@ class KeeneticLocalIpSensor(ControllerEntity, SensorEntity):
 class KeeneticMeshLocalIpSensor(MeshEntity, SensorEntity):
     """Sensor for local IP address of a mesh node."""
     _attr_has_entity_name = True
-    _attr_translation_key = "mesh_local_ip"
+    _attr_name = "IP"
     _attr_icon = "mdi:ip-network"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -1535,10 +1463,6 @@ class KeeneticMeshLocalIpSensor(MeshEntity, SensorEntity):
         return f"{safe_cid}_local_ip"
 
     @property
-    def name(self) -> str:
-        return "Local IP Address"
-
-    @property
     def native_value(self) -> str | None:
         # Если IP изменился, берем актуальный из данных ноды
         node = self._node
@@ -1549,7 +1473,7 @@ class KeeneticMeshLocalIpSensor(MeshEntity, SensorEntity):
 class KeeneticMeshCpuLoadSensor(MeshEntity, SensorEntity):
     """Mesh node CPU load sensor."""
     _attr_has_entity_name = True
-    _attr_translation_key = "mesh_cpu_load"
+    _attr_translation_key = "cpu_load"
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -1562,10 +1486,6 @@ class KeeneticMeshCpuLoadSensor(MeshEntity, SensorEntity):
     def unique_id(self) -> str:
         safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
         return f"{safe_cid}_cpu_load"
-
-    @property
-    def name(self) -> str:
-        return "CPU Load"
 
     @property
     def native_value(self) -> float | None:
@@ -1583,7 +1503,7 @@ class KeeneticMeshCpuLoadSensor(MeshEntity, SensorEntity):
 class KeeneticMeshMemorySensor(MeshEntity, SensorEntity):
     """Mesh node memory usage percentage sensor."""
     _attr_has_entity_name = True
-    _attr_translation_key = "mesh_memory"
+    _attr_translation_key = "memory_usage"
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -1596,10 +1516,6 @@ class KeeneticMeshMemorySensor(MeshEntity, SensorEntity):
     def unique_id(self) -> str:
         safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
         return f"{safe_cid}_memory"
-
-    @property
-    def name(self) -> str:
-        return "Memory Usage"
 
     @property
     def native_value(self) -> float | None:
