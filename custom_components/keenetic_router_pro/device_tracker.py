@@ -79,6 +79,11 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
             initial_ip,
             ping_coordinator
         )
+        self._main_coordinator = coordinator
+        self._ping_coordinator = ping_coordinator
+        self._mac = mac.lower()
+        self._label = label
+        self._initial_ip = initial_ip
         self._attr_name = label
 
     async def async_added_to_hass(self) -> None:
