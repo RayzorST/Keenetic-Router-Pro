@@ -9,7 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from ..const import DOMAIN, DATA_COORDINATOR, DATA_CLIENT
+from ..const import DOMAIN, DATA_COORDINATOR, DATA_CLIENT, CONF_TRACKED_CLIENTS
 from ..coordinator import KeeneticCoordinator
 from .. import KeeneticClient
 
@@ -57,6 +57,23 @@ from .traffic import (
     KeeneticWanRxSensor,
     KeeneticWanTxSensor,
 )
+from .client import (
+    KeeneticClientIpSensor,
+    KeeneticClientRegisteredSensor,
+    KeeneticClientLinkSensor,
+    KeeneticClientUptimeSensor,
+    KeeneticClientFirstSeenSensor,
+    KeeneticClientLastSeenSensor,
+    KeeneticClientRxSensor,
+    KeeneticClientTxSensor,
+    KeeneticClientSpeedSensor,
+    KeeneticClientPortSensor,
+    KeeneticClientRssiSensor,
+    KeeneticClientTxRateSensor,
+    KeeneticClientConnectionTypeSensor,
+    KeeneticClientWifiBandSensor,
+    KeeneticClientWifiModeSensor,   
+)
 
 
 async def async_setup_entry(
@@ -82,7 +99,7 @@ async def async_setup_entry(
     entities.append(KeeneticPppoeUptimeSensor(coordinator, entry))
     entities.append(KeeneticActiveConnectionsSensor(coordinator, entry))
 
-    # Клиентские сенсоры
+    # Клиентские сенсоры (общие счетчики)
     entities.append(KeeneticConnectedClientsSensor(coordinator, entry))
     entities.append(KeeneticRouterClientsSensor(coordinator, entry))
     entities.append(KeeneticDisconnectedClientsSensor(coordinator, entry))
@@ -150,5 +167,38 @@ async def async_setup_entry(
                 mesh_node_name=musb_dev.get("mesh_node_name"),
                 mesh_cid=musb_dev.get("mesh_cid"),
             ))
+
+    # Клиентские сенсоры для каждого отслеживаемого устройства
+    tracked_clients = entry.data.get(CONF_TRACKED_CLIENTS, [])
+    seen_macs: set[str] = set()
+
+    for client_info in tracked_clients:
+        if not isinstance(client_info, dict):
+            continue
+
+        mac = str(client_info.get("mac") or "").lower()
+        if not mac or mac in seen_macs:
+            continue
+        seen_macs.add(mac)
+
+        label = client_info.get("name") or mac.upper()
+        initial_ip = client_info.get("ip")
+
+        # Добавляем все сенсоры для клиента
+        entities.append(KeeneticClientIpSensor(coordinator, entry, mac, label, initial_ip))
+        entities.append(KeeneticClientRegisteredSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientLinkSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientUptimeSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientFirstSeenSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientLastSeenSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientRxSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientTxSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientSpeedSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientPortSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientRssiSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientTxRateSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientConnectionTypeSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientWifiBandSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientWifiModeSensor(coordinator, entry, mac, label))
 
     async_add_entities(entities)
