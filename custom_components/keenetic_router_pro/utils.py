@@ -99,10 +99,10 @@ def get_client_device_info(
     manufacturer = None
     model = None
     if client:
-        if client.get("name"):
-            device_name = client.get("name")
-        elif client.get("hostname"):
-            device_name = client.get("hostname").split(' ')[0]
+        if client.get("hostname"):
+            device_name = client.get("hostname")
+        else:
+            device_name = client.get("name", "").split(' - ')[0]
 
         ssdp = client.get("ssdp")
         if ssdp:
