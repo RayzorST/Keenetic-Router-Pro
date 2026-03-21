@@ -87,19 +87,17 @@ async def async_setup_entry(
     client: Optional[KeeneticClient] = data.get(DATA_CLIENT)
     entities: list[SensorEntity] = []
 
-    # Системные сенсоры
+    # Temel sistem sensörleri
     entities.append(KeeneticCpuLoadSensor(coordinator, entry))
     entities.append(KeeneticMemoryUsageSensor(coordinator, entry))
     entities.append(KeeneticUptimeSensor(coordinator, entry))
     entities.append(KeeneticFirmwareVersionSensor(coordinator, entry))
 
-    # Сетевые сенсоры
+    # Yeni sensörler
     entities.append(KeeneticWanStatusSensor(coordinator, entry))
     entities.append(KeeneticWanIpSensor(coordinator, entry))
     entities.append(KeeneticPppoeUptimeSensor(coordinator, entry))
     entities.append(KeeneticActiveConnectionsSensor(coordinator, entry))
-
-    # Клиентские сенсоры (общие счетчики)
     entities.append(KeeneticConnectedClientsSensor(coordinator, entry))
     entities.append(KeeneticRouterClientsSensor(coordinator, entry))
     entities.append(KeeneticDisconnectedClientsSensor(coordinator, entry))
@@ -143,21 +141,21 @@ async def async_setup_entry(
             if node_ip:
                 entities.append(KeeneticMeshLocalIpSensor(coordinator, entry, node_cid, node_ip))
 
-    # WireGuard
+    # WireGuard profilleri için sensörler
     wg_profiles = coordinator.data.get("wireguard", {}).get("profiles", {})
     for name in wg_profiles:
         entities.append(KeeneticWgUptimeSensor(coordinator, entry, name))
         entities.append(KeeneticWgRxSensor(coordinator, entry, name))
         entities.append(KeeneticWgTxSensor(coordinator, entry, name))
 
-    # USB сенсоры (основной роутер)
+    # USB depolama sensörleri (ana router)
     usb_devices = coordinator.data.get("usb_storage", [])
     for usb_dev in usb_devices:
         dev_id = usb_dev.get("id")
         if dev_id:
             entities.append(KeeneticUsbStorageSensor(coordinator, entry, dev_id))
 
-    # USB сенсоры (mesh ноды)
+    # Mesh node USB sensörleri
     mesh_usb_devices = coordinator.data.get("mesh_usb", [])
     for musb_dev in mesh_usb_devices:
         dev_id = musb_dev.get("id")

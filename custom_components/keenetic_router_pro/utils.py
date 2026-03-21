@@ -96,23 +96,22 @@ def get_client_device_info(
     """Device info для отслеживаемого клиента как отдельного устройства."""
     
     device_name = label
+    manufacturer = None
+    model = None
     if client:
         if client.get("name"):
             device_name = client.get("name")
         elif client.get("hostname"):
             device_name = client.get("hostname").split(' ')[0]
 
-    manufacturer = None
-    model = None
-    if client:
-        if client.get("ssdp"):
-            if client.get("manufacturer"):
-                manufacturer = client.get("manufacturer")
+        ssdp = client.get("ssdp")
+        if ssdp:
+            if ssdp.get("manufacturer"):
+                manufacturer = ssdp.get("manufacturer")
 
-            if client.get("model"):
-                model = client.get("model")
+            if ssdp.get("model"):
+                model = ssdp.get("model")
     
-    # Get IP address
     ip_address = initial_ip
     if client and client.get("ip"):
         ip_address = client.get("ip")
@@ -122,7 +121,7 @@ def get_client_device_info(
         "name": device_name,
         "manufacturer": manufacturer,
         "model": model,
-        "via_device": (DOMAIN, entry_id),  # Links to main router
+        "via_device": (DOMAIN, entry_id),
         "configuration_url": f"http://{ip_address}" if ip_address else None,
         "connections": {("mac", mac.upper())},
     }
