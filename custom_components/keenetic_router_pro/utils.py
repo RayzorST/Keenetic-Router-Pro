@@ -85,3 +85,43 @@ def get_mesh_usb_device_info(
         }
     # Fallback к главному устройству
     return get_main_device_info(title, entry_id, None, None, node_ip, ssl)
+
+def get_client_device_info(
+    entry_id: str,
+    mac: str,
+    label: str,
+    client: Optional[Dict[str, Any]] = None,
+    initial_ip: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Device info для отслеживаемого клиента как отдельного устройства."""
+    
+    device_name = label
+    manufacturer = None
+    model = None
+    if client:
+        if client.get("hostname"):
+            device_name = client.get("hostname")
+        else:
+            device_name = client.get("name", "").split(' - ')[0]
+
+        ssdp = client.get("ssdp")
+        if ssdp:
+            if ssdp.get("manufacturer"):
+                manufacturer = ssdp.get("manufacturer")
+
+            if ssdp.get("model"):
+                model = ssdp.get("model")
+    
+    ip_address = initial_ip
+    if client and client.get("ip"):
+        ip_address = client.get("ip")
+    
+    return {
+        "identifiers": {(DOMAIN, f"client_{mac.replace(':', '_')}")},
+        "name": device_name,
+        "manufacturer": manufacturer,
+        "model": model,
+        "via_device": (DOMAIN, entry_id),
+        "configuration_url": f"http://{ip_address}" if ip_address else None,
+        "connections": {("mac", mac.upper())},
+    }

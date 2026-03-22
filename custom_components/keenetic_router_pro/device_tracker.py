@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN, DATA_COORDINATOR, DATA_PING_COORDINATOR, CONF_TRACKED_CLIENTS
 from .coordinator import KeeneticCoordinator, KeeneticPingCoordinator
-from .entity import ControllerEntity
+from .entity import ClientEntity
 
 
 async def async_setup_entry(
@@ -19,10 +19,9 @@ async def async_setup_entry(
     """Set up Keenetic Router Pro device trackers from a config entry."""
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator: KeeneticCoordinator = data[DATA_COORDINATOR]
-    ping_coordinator: KeeneticPingCoordinator = data[DATA_PING_COORDINATOR]
+    ping_coordinator: KeeneticPingCoordinator = data.get(DATA_PING_COORDINATOR)  # Note: get, might not exist
     entities: list[KeeneticClientTracker] = []
 
-    # Sadece config'de belirtilen tracked client'ları ekle
     tracked_clients = entry.data.get(CONF_TRACKED_CLIENTS, [])
 
     if not tracked_clients:
@@ -56,7 +55,7 @@ async def async_setup_entry(
         async_add_entities(entities)
 
 
-class KeeneticClientTracker(ControllerEntity, ScannerEntity):
+class KeeneticClientTracker(ClientEntity, ScannerEntity):
     """Device tracker entity representing a tracked client."""
     _attr_should_poll = False
     _attr_entity_category = None  # Diagnostic altında değil, ayrı göster
@@ -64,13 +63,22 @@ class KeeneticClientTracker(ControllerEntity, ScannerEntity):
     def __init__(
         self,
         coordinator: KeeneticCoordinator,
-        ping_coordinator: KeeneticPingCoordinator,
+        ping_coordinator: KeeneticPingCoordinator | None,
         entry: ConfigEntry,
         mac: str,
         label: str,
         initial_ip: str | None = None,
     ) -> None:
-        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
+        ClientEntity.__init__(
+            self, 
+            coordinator,
+            entry.entry_id,
+            entry.title,
+            mac,
+            label,
+            initial_ip,
+            ping_coordinator
+        )
         self._main_coordinator = coordinator
         self._ping_coordinator = ping_coordinator
         self._mac = mac.lower()
