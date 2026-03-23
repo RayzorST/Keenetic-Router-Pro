@@ -314,7 +314,7 @@ class KeeneticMeshFirmwareVersionSensor(MeshEntity, SensorEntity):
 class KeeneticMeshPortSensor(MeshEntity, SensorEntity):
     """Individual mesh node port sensor."""
     _attr_has_entity_name = True
-    _attr_icon = "mdi:ethernet-port"
+    _attr_icon = "mdi:ethernet"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
@@ -358,7 +358,7 @@ class KeeneticMeshPortSensor(MeshEntity, SensorEntity):
         """Return icon based on port state."""
         state = self.native_value
         if state == "up":
-            return "mdi:ethernet-cable"
+            return "mdi:ethernet"
         if state == "down":
             return "mdi:ethernet-off"
         return "mdi:ethernet"
