@@ -115,7 +115,7 @@ async def async_setup_entry(
 class KeeneticQrWiFiImageEntity(CoordinatorEntity[KeeneticCoordinator], ImageEntity):
     """Representation of a Keenetic Wi-Fi QR code image."""
 
-    _attr_entity_registry_enabled_default = False
+    _attr_entity_registry_enabled_default = True
     _attr_has_entity_name = True
     _attr_content_type = "image/png"
 
@@ -147,6 +147,7 @@ class KeeneticQrWiFiImageEntity(CoordinatorEntity[KeeneticCoordinator], ImageEnt
         self._password = self._get_password_from_interfaces()
         self._attr_device_info = self._get_device_info()
         self._attr_unique_id = f"{entry.entry_id}_wifi_qr_{network_type}"
+        self._attr_image_last_updated = dt_util.utcnow()
         self._attr_translation_key = f"qr_wifi_{network_type}"
         self._attr_translation_placeholders = {
             "ssid": wifi_network.get("ssid", "Wi-Fi"),
@@ -211,7 +212,15 @@ class KeeneticQrWiFiImageEntity(CoordinatorEntity[KeeneticCoordinator], ImageEnt
             return None
 
         try:
-            password = self._get_password_from_interfaces()
+            # Try coordinator wifi_passwords first (from dedicated API call)
+            interface_id = self._wifi_network.get("id")
+            wifi_passwords = self.coordinator.data.get("wifi_passwords", {})
+            password = wifi_passwords.get(interface_id) if interface_id else None
+            
+            # Fallback to extracting from raw interfaces
+            if not password:
+                password = self._get_password_from_interfaces()
+            
             if password:
                 qr_string = f"WIFI:S:{ssid};T:WPA;P:{password};;"
                 _LOGGER.debug("Generating QR code with password for %s network: %s", 
@@ -223,7 +232,20 @@ class KeeneticQrWiFiImageEntity(CoordinatorEntity[KeeneticCoordinator], ImageEnt
 
             code = pyqrcode.create(qr_string)
             buffer = io.BytesIO()
-            code.png(buffer, scale=10)
+
+            # Try PNG first (requires pypng), fall back to SVG
+            try:
+                code.png(buffer, scale=10)
+                self._attr_content_type = "image/png"
+            except ImportError:
+                _LOGGER.warning(
+                    "pypng not installed, falling back to SVG for QR code. "
+                    "Install pypng for PNG support: pip install pypng"
+                )
+                buffer = io.BytesIO()
+                code.svg(buffer, scale=10, xmldecl=False, svgclass=None, lineclass=None)
+                self._attr_content_type = "image/svg+xml"
+
             self._image_bytes = buffer.getvalue()
             
             return self._image_bytes
