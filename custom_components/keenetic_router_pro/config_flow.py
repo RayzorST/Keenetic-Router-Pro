@@ -59,13 +59,11 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle a discovered Keenetic router via SSDP."""
         _LOGGER.debug("SSDP discovery received: %s", discovery_info)
         
-        # Extract hostname from SSDP location URL
         hostname = urlparse(discovery_info.ssdp_location).hostname
         if not hostname:
             _LOGGER.debug("No hostname in SSDP discovery, aborting")
             return self.async_abort(reason="no_host")
 
-        # CRITICAL: Check if this router is already configured
         current_entries = self._async_current_entries()
         _LOGGER.debug("Checking %d existing entries for host %s", len(current_entries), hostname)
         
@@ -77,14 +75,9 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             hostname, entry.title)
                 return self.async_abort(reason="already_configured")
         
-        # Also check if any entry has the same unique_id (if we can determine it)
-        # But since we don't have MAC yet, we'll rely on host check
-        
-        # Store discovered host for later use
         self._discovered_host = hostname
         self._discovered_name = discovery_info.upnp.get("friendlyName", "Keenetic Router")
 
-        # Set context title for UI display
         self.context["title_placeholders"] = {
             "name": self._discovered_name,
             "host": hostname
@@ -92,7 +85,6 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         _LOGGER.debug("Discovered new Keenetic router via SSDP: %s at %s", self._discovered_name, hostname)
         
-        # Proceed to user step with pre-filled host
         return await self.async_step_user()
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -103,12 +95,10 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             try:
-                # Use discovered host if available and not overridden
                 if self._discovered_host and user_input.get(CONF_HOST) == "192.168.1.1":
                     user_input[CONF_HOST] = self._discovered_host
                     _LOGGER.debug("Using discovered host: %s", user_input[CONF_HOST])
-                
-                # Create API client and test connection
+
                 session = async_get_clientsession(self.hass)
                 client = KeeneticClient(
                     host=user_input[CONF_HOST],
@@ -123,16 +113,8 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                              user_input[CONF_HOST], user_input[CONF_PORT])
                 
                 await client.async_start(session)
-                _LOGGER.debug("Successfully connected to router")
-                
-                # Get system info and interfaces
-                system_info = await client.async_get_system_info()
-                _LOGGER.debug("System info: %s", system_info)
-                
+                system_info = await client.async_get_system_info()   
                 interfaces = await client.async_get_interfaces()
-                _LOGGER.debug("Got interfaces data")
-                
-                # Find MAC address
                 mac = None
                 if isinstance(interfaces, dict):
                     for iface_id, iface_data in interfaces.items():
@@ -150,38 +132,25 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 if mac and mac != "00:00:00:00:00:00":
                                     _LOGGER.debug("Found interface MAC: %s from %s", mac, iface_id)
                                     break
-                
-                # Create unique ID
+
                 vendor = system_info.get("vendor", "Keenetic")
                 device = system_info.get("device", system_info.get("model", "Router"))
                 
                 if mac:
-                    # Format MAC and take last 8 chars
                     formatted_mac = format_mac(mac).replace(":", "")
                     unique_suffix = formatted_mac[-8:] if len(formatted_mac) >= 8 else formatted_mac
                     unique_id = f"{vendor} {device} {unique_suffix}"
                 else:
-                    # Fallback to hostname
                     hostname = system_info.get("hostname", user_input[CONF_HOST])
                     unique_id = f"{vendor} {device} {hostname}"
                 
-                _LOGGER.debug("Generated unique ID: %s", unique_id)
-                
-                # CRITICAL: Check if already configured - this should abort if exists
-                _LOGGER.debug("Checking if unique_id %s already configured", unique_id)
                 await self.async_set_unique_id(unique_id)
-                
-                # This should raise an exception if already configured
-                _LOGGER.debug("Calling _abort_if_unique_id_configured")
                 self._abort_if_unique_id_configured()
-                _LOGGER.debug("Unique ID is new, continuing with setup")
-                
-                # If we get here, it's a new configuration
+
                 self._user_input = user_input
                 self._title = f"{vendor} {device}"
                 self._client = client
                 
-                # Get clients for selection
                 try:
                     available_clients = await client.async_get_clients()
                     _LOGGER.debug("Found %d clients", len(available_clients) if available_clients else 0)
@@ -221,10 +190,8 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected error during setup: %s", err)
                 errors["base"] = "unknown"
 
-        # Prepare default values
         default_host = self._discovered_host or "192.168.1.1"
         
-        # Show form
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
