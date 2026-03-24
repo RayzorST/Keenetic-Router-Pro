@@ -28,6 +28,8 @@
     },
     "abort": {
       "already_configured": "Device is already configured",
+      "already_in_progress": "Configuration flow is already in progress",
+      "no_host": "No host found in discovery data",
       "no_clients": "No clients found on the network"
     }
   },

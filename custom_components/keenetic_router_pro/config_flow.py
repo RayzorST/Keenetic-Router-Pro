@@ -50,14 +50,36 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self._discovered_host: str | None = None
         self._discovered_name: str | None = None
+        self._available_clients: list[dict[str, Any]] = []
+        self._user_input: dict[str, Any] = {}
+        self._title: str = ""
+        self._client: KeeneticClient | None = None
 
     async def async_step_ssdp(self, discovery_info: SsdpServiceInfo) -> FlowResult:
         """Handle a discovered Keenetic router via SSDP."""
+        _LOGGER.debug("SSDP discovery received: %s", discovery_info)
+        
         # Extract hostname from SSDP location URL
         hostname = urlparse(discovery_info.ssdp_location).hostname
         if not hostname:
+            _LOGGER.debug("No hostname in SSDP discovery, aborting")
             return self.async_abort(reason="no_host")
 
+        # CRITICAL: Check if this router is already configured
+        current_entries = self._async_current_entries()
+        _LOGGER.debug("Checking %d existing entries for host %s", len(current_entries), hostname)
+        
+        for entry in current_entries:
+            entry_host = entry.data.get(CONF_HOST)
+            _LOGGER.debug("Entry %s has host: %s", entry.title, entry_host)
+            if entry_host == hostname:
+                _LOGGER.debug("Router at %s is already configured as '%s', skipping SSDP", 
+                            hostname, entry.title)
+                return self.async_abort(reason="already_configured")
+        
+        # Also check if any entry has the same unique_id (if we can determine it)
+        # But since we don't have MAC yet, we'll rely on host check
+        
         # Store discovered host for later use
         self._discovered_host = hostname
         self._discovered_name = discovery_info.upnp.get("friendlyName", "Keenetic Router")
@@ -68,20 +90,23 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "host": hostname
         }
 
-        _LOGGER.debug("Discovered Keenetic router via SSDP: %s at %s", self._discovered_name, hostname)
-
+        _LOGGER.debug("Discovered new Keenetic router via SSDP: %s at %s", self._discovered_name, hostname)
+        
         # Proceed to user step with pre-filled host
         return await self.async_step_user()
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}
+        
+        _LOGGER.debug("Step user called with input: %s", user_input)
 
         if user_input is not None:
             try:
                 # Use discovered host if available and not overridden
                 if self._discovered_host and user_input.get(CONF_HOST) == "192.168.1.1":
                     user_input[CONF_HOST] = self._discovered_host
+                    _LOGGER.debug("Using discovered host: %s", user_input[CONF_HOST])
                 
                 # Create API client and test connection
                 session = async_get_clientsession(self.hass)
@@ -94,13 +119,20 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     use_challenge_auth=user_input.get(CONF_USE_CHALLENGE_AUTH, False),
                 )
                 
+                _LOGGER.debug("Attempting to connect to router at %s:%s", 
+                             user_input[CONF_HOST], user_input[CONF_PORT])
+                
                 await client.async_start(session)
+                _LOGGER.debug("Successfully connected to router")
                 
-                # Get system info and interfaces to create unique ID
+                # Get system info and interfaces
                 system_info = await client.async_get_system_info()
-                interfaces = await client.async_get_interfaces()
+                _LOGGER.debug("System info: %s", system_info)
                 
-                # Find MAC address (similar to the working integration)
+                interfaces = await client.async_get_interfaces()
+                _LOGGER.debug("Got interfaces data")
+                
+                # Find MAC address
                 mac = None
                 if isinstance(interfaces, dict):
                     for iface_id, iface_data in interfaces.items():
@@ -108,6 +140,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             if iface_data.get("type") == "Bridge" or "Bridge0" in iface_id:
                                 mac = iface_data.get("mac")
                                 if mac:
+                                    _LOGGER.debug("Found Bridge MAC: %s from %s", mac, iface_id)
                                     break
                     
                     if not mac:
@@ -115,14 +148,15 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             if isinstance(iface_data, dict):
                                 mac = iface_data.get("mac")
                                 if mac and mac != "00:00:00:00:00:00":
+                                    _LOGGER.debug("Found interface MAC: %s from %s", mac, iface_id)
                                     break
                 
-                # Create unique ID similar to the working integration
+                # Create unique ID
                 vendor = system_info.get("vendor", "Keenetic")
                 device = system_info.get("device", system_info.get("model", "Router"))
                 
                 if mac:
-                    # Format MAC and take last 8 chars (like the working integration)
+                    # Format MAC and take last 8 chars
                     formatted_mac = format_mac(mac).replace(":", "")
                     unique_suffix = formatted_mac[-8:] if len(formatted_mac) >= 8 else formatted_mac
                     unique_id = f"{vendor} {device} {unique_suffix}"
@@ -133,46 +167,47 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 
                 _LOGGER.debug("Generated unique ID: %s", unique_id)
                 
-                # Check if already configured
+                # CRITICAL: Check if already configured - this should abort if exists
+                _LOGGER.debug("Checking if unique_id %s already configured", unique_id)
                 await self.async_set_unique_id(unique_id)
-                self._abort_if_unique_id_configured()
                 
-                # Get title
-                title = f"{vendor} {device}"
+                # This should raise an exception if already configured
+                _LOGGER.debug("Calling _abort_if_unique_id_configured")
+                self._abort_if_unique_id_configured()
+                _LOGGER.debug("Unique ID is new, continuing with setup")
+                
+                # If we get here, it's a new configuration
+                self._user_input = user_input
+                self._title = f"{vendor} {device}"
+                self._client = client
                 
                 # Get clients for selection
                 try:
                     available_clients = await client.async_get_clients()
+                    _LOGGER.debug("Found %d clients", len(available_clients) if available_clients else 0)
                     
-                    # Tracked clients selection
                     if available_clients:
-                        tracked_clients = []
+                        self._available_clients = []
                         for client_info in available_clients:
                             if client_info.get("mac"):
-                                tracked_clients.append({
+                                self._available_clients.append({
                                     "mac": client_info["mac"].lower(),
                                     "ip": client_info.get("ip", ""),
                                     "name": client_info.get("name") or client_info.get("hostname", ""),
                                 })
                         
-                        # Store client info for next step
-                        self._available_clients = tracked_clients
-                        self._user_input = user_input
-                        self._title = title
-                        self._client = client
-                        
                         return await self.async_step_select_clients()
                     else:
-                        # No clients found, create entry directly
+                        _LOGGER.debug("No clients found, creating entry directly")
                         return self.async_create_entry(
-                            title=title,
+                            title=self._title,
                             data={**user_input, CONF_TRACKED_CLIENTS: []},
                         )
                         
                 except Exception as e:
                     _LOGGER.warning("Could not fetch clients: %s", e)
                     return self.async_create_entry(
-                        title=title,
+                        title=self._title,
                         data={**user_input, CONF_TRACKED_CLIENTS: []},
                     )
 
@@ -212,8 +247,11 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Select clients to track."""
+        _LOGGER.debug("Step select_clients called with input: %s", user_input)
+        
         if user_input is not None:
             selected_macs = user_input.get("tracked_clients", [])
+            _LOGGER.debug("Selected MACs: %s", selected_macs)
             
             # Filter selected clients
             tracked_clients = [
@@ -221,6 +259,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if client["mac"] in selected_macs
             ]
             
+            _LOGGER.debug("Creating entry with title: %s", self._title)
             return self.async_create_entry(
                 title=self._title,
                 data={**self._user_input, CONF_TRACKED_CLIENTS: tracked_clients},
@@ -236,6 +275,8 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         # Sort alphabetically
         client_options = dict(sorted(client_options.items(), key=lambda x: x[1].lower()))
+        
+        _LOGGER.debug("Showing client selection form with %d options", len(client_options))
         
         return self.async_show_form(
             step_id="select_clients",
@@ -273,6 +314,8 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
     
     async def async_step_init(self, user_input=None):
         """Manage options."""
+        _LOGGER.debug("Options flow init called with input: %s", user_input)
+        
         if user_input is not None:
             # Update configuration
             new_data = dict(self._config_entry.data)
@@ -281,11 +324,13 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
                 self._config_entry,
                 data=new_data,
             )
+            _LOGGER.debug("Updated configuration with new tracked clients")
             return self.async_create_entry(title="", data={})
         
         # Get current tracked clients
         current_tracked = self._config_entry.data.get(CONF_TRACKED_CLIENTS, [])
         current_macs = {c["mac"] for c in current_tracked if isinstance(c, dict) and c.get("mac")}
+        _LOGGER.debug("Current tracked MACs: %s", current_macs)
         
         # Try to get current clients from router
         try:
@@ -302,6 +347,7 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
             )
             await client.async_start(session)
             available_clients = await client.async_get_clients()
+            _LOGGER.debug("Found %d clients from router", len(available_clients) if available_clients else 0)
             
             # Prepare client options
             client_options = {}
@@ -325,6 +371,7 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
             
             # Sort options
             client_options = dict(sorted(client_options.items(), key=lambda x: x[1].lower()))
+            _LOGGER.debug("Prepared %d client options", len(client_options))
             
         except Exception as e:
             _LOGGER.error("Could not fetch clients for options: %s", e)
