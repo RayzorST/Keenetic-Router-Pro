@@ -25,6 +25,7 @@ from .network import (
     KeeneticPppoeUptimeSensor,
     KeeneticActiveConnectionsSensor,
     KeeneticLocalIpSensor,
+    KeeneticMainPortSensor,
 )
 from .clients import (
     KeeneticConnectedClientsSensor,
@@ -124,6 +125,13 @@ async def async_setup_entry(
     else:
         host = entry.data.get("host", "unknown")
         entities.append(KeeneticLocalIpSensor(coordinator, entry, host))
+
+    # Ana router port sensörleri
+    main_ports = coordinator.data.get("port_info", [])
+    for port in main_ports:
+        port_label = port.get("label")
+        if port_label is not None:
+            entities.append(KeeneticMainPortSensor(coordinator, entry, port_label))
 
     # Mesh система
     entities.append(KeeneticMeshSystemStateSensor(coordinator, entry))
