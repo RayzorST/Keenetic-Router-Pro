@@ -25,6 +25,7 @@ from .network import (
     KeeneticPppoeUptimeSensor,
     KeeneticActiveConnectionsSensor,
     KeeneticLocalIpSensor,
+    KeeneticMainPortSensor,
 )
 from .clients import (
     KeeneticConnectedClientsSensor,
@@ -50,6 +51,7 @@ from .mesh import (
     KeeneticMeshClientsSensor,
     KeeneticMeshFirmwareVersionSensor,
     KeeneticMeshLocalIpSensor,
+    KeeneticMeshPortSensor
 )
 from .traffic import (
     KeeneticLanRxSensor,
@@ -124,6 +126,13 @@ async def async_setup_entry(
         host = entry.data.get("host", "unknown")
         entities.append(KeeneticLocalIpSensor(coordinator, entry, host))
 
+    # Ana router port sensörleri
+    main_ports = coordinator.data.get("port_info", [])
+    for port in main_ports:
+        port_label = port.get("label")
+        if port_label is not None:
+            entities.append(KeeneticMainPortSensor(coordinator, entry, port_label))
+
     # Mesh система
     entities.append(KeeneticMeshSystemStateSensor(coordinator, entry))
 
@@ -140,6 +149,11 @@ async def async_setup_entry(
             entities.append(KeeneticMeshFirmwareVersionSensor(coordinator, entry, node_cid))
             if node_ip:
                 entities.append(KeeneticMeshLocalIpSensor(coordinator, entry, node_cid, node_ip))
+            ports = node.get("port", [])
+            for port in ports:
+                port_label = port.get("label")
+                if port_label is not None:
+                    entities.append(KeeneticMeshPortSensor(coordinator, entry, node_cid, port_label))
 
     # WireGuard profilleri için sensörler
     wg_profiles = coordinator.data.get("wireguard", {}).get("profiles", {})

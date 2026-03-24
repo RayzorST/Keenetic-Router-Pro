@@ -397,10 +397,233 @@ class KeeneticClient:
         data = await self._rci_get("show/version")
         return data or {}
 
+    async def async_get_port_info(self, interfaces: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
+        """Return physical port information for the main router.
+        
+        Ports are found in show/interface as top-level entries with type "Port".
+        Example keys: "0", "1", "2", "3", "4" with label and link status.
+        
+        Also checks GigabitEthernet*.port nested dicts as fallback.
+        """
+        if interfaces is None:
+            interfaces = await self.async_get_interfaces()
+        
+        if not interfaces or not isinstance(interfaces, dict):
+            return []
+        
+        ports: List[Dict[str, Any]] = []
+        seen_labels: set = set()
+        
+        # Method 1: Top-level Port entries (keys like "0", "1", "2", "3", "4")
+        for iface_id, iface in interfaces.items():
+            if not isinstance(iface, dict):
+                continue
+            if iface.get("type") != "Port":
+                continue
+            
+            label = iface.get("label") or iface.get("interface-name") or iface_id
+            if label in seen_labels:
+                continue
+            seen_labels.add(label)
+            
+            entry: Dict[str, Any] = {
+                "label": label,
+                "appearance": iface.get("type"),
+                "link": iface.get("link", "unknown"),
+            }
+            if iface.get("link") == "up":
+                entry["speed"] = iface.get("speed")
+                entry["duplex"] = iface.get("duplex")
+            ports.append(entry)
+        
+        if ports:
+            # Sort by label for consistent ordering
+            ports.sort(key=lambda p: str(p.get("label", "")))
+            _LOGGER.debug("Found %d main router ports from top-level Port entries", len(ports))
+            return ports
+        
+        # Method 2: Nested port dicts inside GigabitEthernet interfaces
+        for iface_id, iface in interfaces.items():
+            if not isinstance(iface, dict):
+                continue
+            if iface.get("type") != "GigabitEthernet":
+                continue
+            
+            port_data = iface.get("port")
+            if not port_data or not isinstance(port_data, dict):
+                continue
+            
+            # port can be a single dict (GigabitEthernet1) or dict of dicts (GigabitEthernet0)
+            if "label" in port_data:
+                # Single port dict
+                label = port_data.get("label") or port_data.get("interface-name")
+                if label and label not in seen_labels:
+                    seen_labels.add(label)
+                    entry = {
+                        "label": label,
+                        "appearance": port_data.get("type"),
+                        "link": port_data.get("link", "unknown"),
+                    }
+                    if port_data.get("link") == "up":
+                        entry["speed"] = port_data.get("speed")
+                        entry["duplex"] = port_data.get("duplex")
+                    ports.append(entry)
+            else:
+                # Dict of port dicts (keyed by port number)
+                for port_key, port_val in port_data.items():
+                    if not isinstance(port_val, dict):
+                        continue
+                    label = port_val.get("label") or port_val.get("interface-name") or port_key
+                    if label in seen_labels:
+                        continue
+                    seen_labels.add(label)
+                    entry = {
+                        "label": label,
+                        "appearance": port_val.get("type"),
+                        "link": port_val.get("link", "unknown"),
+                    }
+                    if port_val.get("link") == "up":
+                        entry["speed"] = port_val.get("speed")
+                        entry["duplex"] = port_val.get("duplex")
+                    ports.append(entry)
+        
+        if ports:
+            ports.sort(key=lambda p: str(p.get("label", "")))
+            _LOGGER.debug("Found %d main router ports from nested GigabitEthernet port data", len(ports))
+        else:
+            _LOGGER.warning("No physical ports found for main router")
+        
+        return ports
+
     async def async_get_interfaces(self) -> Dict[str, Any]:
         """Return raw interfaces dictionary from /rci/show/interface."""
         data = await self._rci_get("show/interface")
         return data or {}
+
+    async def async_get_wifi_password(self, interface_id: str) -> str | None:
+        """Get WiFi password (PSK) for a specific interface.
+        
+        Tries multiple API paths since different firmware versions
+        store the PSK in different locations.
+        """
+        
+        def _extract_psk(data: Any) -> str | None:
+            """Extract PSK from various possible data structures."""
+            if not isinstance(data, dict):
+                return None
+            
+            # Path: authentication.wpa-psk.psk
+            auth = data.get("authentication", {})
+            if isinstance(auth, dict):
+                wpa_psk = auth.get("wpa-psk", {})
+                if isinstance(wpa_psk, dict) and wpa_psk.get("psk"):
+                    return str(wpa_psk["psk"])
+            
+            # Path: security-level.wpa.psk
+            sec = data.get("security-level", {})
+            if isinstance(sec, dict):
+                wpa = sec.get("wpa", {})
+                if isinstance(wpa, dict) and wpa.get("psk"):
+                    return str(wpa["psk"])
+            
+            # Path: wpa.psk
+            wpa = data.get("wpa", {})
+            if isinstance(wpa, dict) and wpa.get("psk"):
+                return str(wpa["psk"])
+            
+            # Direct key
+            if data.get("key"):
+                return str(data["key"])
+            
+            return None
+        
+        # Method 1: GET show/interface/{id} - interface status with details
+        try:
+            data = await self._rci_get(f"show/interface/{interface_id}")
+            _LOGGER.debug("WiFi password Method 1 (show/interface/%s) response keys: %s", 
+                         interface_id, list(data.keys()) if isinstance(data, dict) else type(data))
+            psk = _extract_psk(data)
+            if psk:
+                _LOGGER.debug("WiFi password found via Method 1 for %s", interface_id)
+                return psk
+        except Exception as err:
+            _LOGGER.debug("WiFi password Method 1 failed for %s: %s", interface_id, err)
+
+        # Method 2: GET interface/{id} - running configuration
+        try:
+            data = await self._rci_get(f"interface/{interface_id}")
+            _LOGGER.debug("WiFi password Method 2 (interface/%s) response keys: %s",
+                         interface_id, list(data.keys()) if isinstance(data, dict) else type(data))
+            psk = _extract_psk(data)
+            if psk:
+                _LOGGER.debug("WiFi password found via Method 2 for %s", interface_id)
+                return psk
+        except Exception as err:
+            _LOGGER.debug("WiFi password Method 2 failed for %s: %s", interface_id, err)
+
+        # Method 3: POST show/interface with nested query
+        try:
+            data = await self._rci_post("show/interface", {interface_id: {}})
+            _LOGGER.debug("WiFi password Method 3 (POST show/interface) response keys: %s",
+                         list(data.keys()) if isinstance(data, dict) else type(data))
+            if isinstance(data, dict):
+                # Response might be nested under interface_id or flat
+                iface_data = data.get(interface_id, data)
+                psk = _extract_psk(iface_data)
+                if psk:
+                    _LOGGER.debug("WiFi password found via Method 3 for %s", interface_id)
+                    return psk
+        except Exception as err:
+            _LOGGER.debug("WiFi password Method 3 failed for %s: %s", interface_id, err)
+
+        # Method 4: Look in the already-fetched full interfaces dict
+        try:
+            interfaces = await self.async_get_interfaces()
+            if interface_id in interfaces:
+                iface_data = interfaces[interface_id]
+                _LOGGER.debug("WiFi password Method 4 (full interfaces[%s]) keys: %s",
+                             interface_id, list(iface_data.keys()) if isinstance(iface_data, dict) else type(iface_data))
+                psk = _extract_psk(iface_data)
+                if psk:
+                    _LOGGER.debug("WiFi password found via Method 4 for %s", interface_id)
+                    return psk
+                    
+            # Also try matching by SSID across all interfaces
+            for iface_id, iface in interfaces.items():
+                if not isinstance(iface, dict):
+                    continue
+                psk = _extract_psk(iface)
+                if psk:
+                    _LOGGER.debug("WiFi password found via SSID scan in interface %s", iface_id)
+                    return psk
+        except Exception as err:
+            _LOGGER.debug("WiFi password Method 4 failed for %s: %s", interface_id, err)
+
+        # Method 5: CLI parse
+        try:
+            result = await self._rci_parse(f"more interface {interface_id}")
+            _LOGGER.debug("WiFi password Method 5 (CLI) response: %s", 
+                         str(result)[:500] if result else "None")
+            if result:
+                result_str = str(result)
+                for line in result_str.splitlines():
+                    line_lower = line.strip().lower()
+                    if "psk" in line_lower or "key" in line_lower:
+                        parts = line.strip().split()
+                        if len(parts) >= 2:
+                            candidate = parts[-1].strip('"').strip("'")
+                            if len(candidate) >= 8:
+                                return candidate
+        except Exception as err:
+            _LOGGER.debug("WiFi password Method 5 failed for %s: %s", interface_id, err)
+        
+        _LOGGER.warning(
+            "Could not retrieve WiFi password for interface %s. "
+            "QR code will be generated without password. "
+            "Check debug logs for details.",
+            interface_id,
+        )
+        return None
 
     async def async_get_interface_stat(self, name: str) -> Dict[str, Any]:
         """Return statistics (traffic, speed) for a specific interface."""
@@ -943,6 +1166,20 @@ class KeeneticClient:
                     and member.get("internet-available", False)
                 )
 
+                ports = member.get("port", [])
+                normalized_ports = []
+                for port in ports:
+                    if isinstance(port, dict):
+                        normalized_port = {
+                            "label": port.get("label"),
+                            "appearance": port.get("appearance"),
+                            "link": port.get("link"),
+                        }
+                        if port.get("link") == "up":
+                            normalized_port["speed"] = port.get("speed")
+                            normalized_port["duplex"] = port.get("duplex")
+                        normalized_ports.append(normalized_port)
+
                 nodes.append({
                     "id": cid,
                     "cid": cid,
@@ -961,7 +1198,9 @@ class KeeneticClient:
                     "firmware_available": member.get("fw-available"),
                     "associations": member.get("associations", 0), 
                     "rci_errors": rci_info.get("errors", 0),
-                    "fqdn": member.get("fqdn")
+                    "fqdn": member.get("fqdn"),
+                    "port": normalized_ports,
+                    "backhaul": member.get("backhaul"),
                 })
 
         except Exception as err:

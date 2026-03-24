@@ -28,6 +28,8 @@
     },
     "abort": {
       "already_configured": "Device is already configured",
+      "already_in_progress": "Configuration flow is already in progress",
+      "no_host": "No host found in discovery data",
       "no_clients": "No clients found on the network"
     }
   },
@@ -92,6 +94,7 @@
       "wifi_5_temperature": {
         "name": "Temperature 5 GHz"
       }
+      
     },
     "button": {
       "reboot": {
@@ -101,6 +104,14 @@
     "update": {
       "firmware_update": {
         "name": "Firmware Update"
+      }
+    },
+    "image": {
+      "qr_wifi_main": {
+        "name": "Wi-Fi QR Code"
+      },
+      "qr_wifi_guest": {
+        "name": "Guest Wi-Fi QR Code"
       }
     }
   }
