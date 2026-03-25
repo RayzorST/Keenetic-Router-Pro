@@ -1,5 +1,5 @@
 # Keenetic Router Pro - Home Assistant Integration
-
+![Downloads](https://img.shields.io/github/downloads/cataseven/Keenetic-Router-Pro/total?color=41BDF5&logo=home-assistant&label=Downloads&suffix=%20downloads&style=for-the-badge)
 [![hacs\_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 [![version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/)
 
