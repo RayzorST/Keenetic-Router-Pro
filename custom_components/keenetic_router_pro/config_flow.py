@@ -284,14 +284,38 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
         _LOGGER.debug("Options flow init called with input: %s", user_input)
         
         if user_input is not None:
+            selected_macs = user_input.get("tracked_clients", [])
+            
+            # Convert selected MAC strings back to dict format
+            # First, build a lookup from available clients + previously tracked
+            mac_lookup: dict[str, dict[str, str]] = {}
+            for c in self._available_clients:
+                if isinstance(c, dict) and c.get("mac"):
+                    mac_lookup[c["mac"].lower()] = c
+            # Also include previously tracked clients (for offline devices)
+            for c in self._config_entry.data.get(CONF_TRACKED_CLIENTS, []):
+                if isinstance(c, dict) and c.get("mac"):
+                    mac_lower = c["mac"].lower()
+                    if mac_lower not in mac_lookup:
+                        mac_lookup[mac_lower] = c
+            
+            tracked_clients = []
+            for mac in selected_macs:
+                mac_lower = mac.lower()
+                if mac_lower in mac_lookup:
+                    tracked_clients.append(mac_lookup[mac_lower])
+                else:
+                    # Fallback: create a minimal dict
+                    tracked_clients.append({"mac": mac_lower, "ip": "", "name": ""})
+            
             # Update configuration
             new_data = dict(self._config_entry.data)
-            new_data[CONF_TRACKED_CLIENTS] = user_input.get("tracked_clients", [])
+            new_data[CONF_TRACKED_CLIENTS] = tracked_clients
             self.hass.config_entries.async_update_entry(
                 self._config_entry,
                 data=new_data,
             )
-            _LOGGER.debug("Updated configuration with new tracked clients")
+            _LOGGER.debug("Updated configuration with new tracked clients: %s", tracked_clients)
             return self.async_create_entry(title="", data={})
         
         # Get current tracked clients
@@ -325,6 +349,12 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
                     if client_info.get("ip"):
                         label = f"{label} ({client_info['ip']})"
                     client_options[mac] = label
+                    # Store full client info for dict conversion later
+                    self._available_clients.append({
+                        "mac": mac,
+                        "ip": client_info.get("ip", ""),
+                        "name": client_info.get("name") or client_info.get("hostname", ""),
+                    })
             
             # Add offline clients that were previously tracked
             for tracked in current_tracked:

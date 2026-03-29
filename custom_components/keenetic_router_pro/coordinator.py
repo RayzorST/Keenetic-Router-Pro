@@ -173,8 +173,13 @@ class KeeneticPingCoordinator(DataUpdateCoordinator[dict[str, bool]]):
         # MAC -> IP mapping (güncellenebilir)
         self._mac_to_ip: dict[str, str] = {}
         for c in tracked_clients:
-            mac = str(c.get("mac") or "").lower()
-            ip = str(c.get("ip") or "")
+            # Defensive: handle both dict and plain string (MAC) formats
+            if isinstance(c, dict):
+                mac = str(c.get("mac") or "").lower()
+                ip = str(c.get("ip") or "")
+            else:
+                mac = str(c).lower()
+                ip = ""
             if mac and ip:
                 self._mac_to_ip[mac] = ip
 
@@ -183,8 +188,12 @@ class KeeneticPingCoordinator(DataUpdateCoordinator[dict[str, bool]]):
         self._tracked_clients = tracked_clients
         self._mac_to_ip = {}
         for c in tracked_clients:
-            mac = str(c.get("mac") or "").lower()
-            ip = str(c.get("ip") or "")
+            if isinstance(c, dict):
+                mac = str(c.get("mac") or "").lower()
+                ip = str(c.get("ip") or "")
+            else:
+                mac = str(c).lower()
+                ip = ""
             if mac and ip:
                 self._mac_to_ip[mac] = ip
 
@@ -196,14 +205,26 @@ class KeeneticPingCoordinator(DataUpdateCoordinator[dict[str, bool]]):
 
     def get_tracked_macs(self) -> set[str]:
         """Return set of tracked MAC addresses."""
-        return {str(c.get("mac") or "").lower() for c in self._tracked_clients if c.get("mac")}
+        result = set()
+        for c in self._tracked_clients:
+            if isinstance(c, dict):
+                mac = str(c.get("mac") or "").lower()
+            else:
+                mac = str(c).lower()
+            if mac:
+                result.add(mac)
+        return result
 
     def get_client_info(self, mac: str) -> dict[str, str] | None:
         """Get client info by MAC address."""
         mac_lower = mac.lower()
         for c in self._tracked_clients:
-            if str(c.get("mac") or "").lower() == mac_lower:
-                return c
+            if isinstance(c, dict):
+                if str(c.get("mac") or "").lower() == mac_lower:
+                    return c
+            else:
+                if str(c).lower() == mac_lower:
+                    return {"mac": str(c).lower(), "ip": "", "name": ""}
         return None
 
     async def _async_ping_host(self, ip: str) -> bool:
