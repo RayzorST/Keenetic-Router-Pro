@@ -15,14 +15,6 @@ labels: Bug
 
 ---
 
-4. Mesh/AP Credentials Check
-For **Mesh Extenders** and **Access Points**, the username and password are the **same as the Main Router**.
-**Are you using the same Main Router's credentials for mesh extenders?**
-- [ ] Yes
-- [ ] No
-
----
-
 ## System Information
 - **Router Model:** [e.g. Keenetic Hero DSL, Viva, Giga...]
 - **Keenetic OS Version:** [e.g. 4.1.2]
