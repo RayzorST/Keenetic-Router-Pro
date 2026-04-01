@@ -1897,21 +1897,287 @@ class KeeneticClient:
 
 
     async def async_start_firmware_update(self) -> bool:
-        """Start firmware update process via /rci/system/update."""
+        """Start firmware update for the controller (main router) ONLY.
+
+        Tries endpoints in order:
+        1. /rci/components stage + commit (KeeneticOS 5.x)
+        2. /rci/system/update (older firmware)
+        Does NOT use mws/update/start as that triggers a mesh-wide update.
+        """
+        # Try KeeneticOS 5.x: stage components then commit
+        try:
+            version_data = await self._rci_get("show/version")
+            ndw_components = ""
+            if isinstance(version_data, dict):
+                ndw_components = version_data.get("ndw", {}).get("components", "")
+
+            if ndw_components:
+                current_components = [
+                    c.strip() for c in ndw_components.split(",") if c.strip()
+                ]
+                install_list = [{"component": c} for c in current_components]
+                payload = [{"components": {"install": install_list}}]
+
+                _LOGGER.debug("Staging component update on controller")
+                await self._request("POST", f"{RCI_ROOT}/", json=payload)
+
+                _LOGGER.debug("Committing component update on controller")
+                await self._rci_post("components/commit", {"reason": "manual"})
+                _LOGGER.info("Controller firmware update started via components/commit")
+                return True
+        except KeeneticApiError as err:
+            if "404" not in str(err):
+                raise HomeAssistantError(f"Failed to start update: {err}") from err
+            _LOGGER.debug("Components update not available, trying system/update")
+
+        # Try system/update (older firmware)
         try:
             result = await self._rci_post("system/update", {"confirm": True})
-
             if isinstance(result, dict):
                 status = result.get("status") or result.get("result")
                 if status in ("started", "ok", True, "accepted"):
-                    _LOGGER.info("Firmware update started")
+                    _LOGGER.info("Controller firmware update started via system/update")
                     return True
+            if result is not None:
+                _LOGGER.info("Controller firmware update started via system/update")
+                return True
+        except KeeneticApiError as err:
+            if "404" not in str(err):
+                raise HomeAssistantError(f"Failed to start update: {err}") from err
+            _LOGGER.debug("system/update returned 404")
 
-            return result is not None
+        msg = "No compatible firmware update endpoint found on this router"
+        _LOGGER.error(msg)
+        raise HomeAssistantError(msg)
 
+    async def async_start_node_firmware_update(
+        self, node_ip: str, node_name: str = ""
+    ) -> bool:
+        """Start firmware update on a specific mesh node by connecting directly.
+
+        Connects to the node's own RCI API and triggers its local update.
+        Always uses challenge auth since mesh nodes may not accept Basic Auth
+        even when the controller does.
+
+        Args:
+            node_ip: IP address of the mesh node.
+            node_name: Display name for logging.
+        """
+        if not self._session or not node_ip:
+            raise HomeAssistantError("Cannot connect to mesh node")
+
+        label = node_name or node_ip
+        scheme = "https" if self._ssl else "http"
+
+        # Try controller's port first, then default port 80
+        ports_to_try = [self._port]
+        if self._port != 80:
+            ports_to_try.append(80)
+
+        for port in ports_to_try:
+            base = f"{scheme}://{node_ip}:{port}"
+
+            # Always do challenge auth with mesh nodes
+            node_headers = await self._authenticate_to_node(node_ip, port)
+            if not node_headers:
+                _LOGGER.debug(
+                    "Could not authenticate to node %s on port %s", label, port
+                )
+                continue
+
+            # KeeneticOS 5.x: two-step update via components
+            # Step 1: Get current components from show/version
+            try:
+                url = f"{base}{RCI_ROOT}/show/version"
+                async with async_timeout.timeout(self._request_timeout):
+                    resp = await self._session.get(url, headers=node_headers)
+                if resp.status == 200:
+                    version_data = await resp.json()
+                    ndw_components = version_data.get("ndw", {}).get("components", "")
+                    if ndw_components:
+                        current_components = [
+                            c.strip() for c in ndw_components.split(",") if c.strip()
+                        ]
+                        _LOGGER.debug(
+                            "Node %s has %d components: %s",
+                            label, len(current_components), current_components,
+                        )
+
+                        # Step 2: POST component list to /rci/
+                        install_list = [
+                            {"component": c} for c in current_components
+                        ]
+                        payload = [{"components": {"install": install_list}}]
+
+                        url = f"{base}{RCI_ROOT}/"
+                        _LOGGER.info(
+                            "Staging component update on node %s", label
+                        )
+                        async with async_timeout.timeout(self._request_timeout):
+                            resp = await self._session.post(
+                                url,
+                                json=payload,
+                                headers=node_headers,
+                            )
+                        if resp.status not in (200, 204):
+                            text = await resp.text()
+                            _LOGGER.warning(
+                                "Node %s component staging returned %s: %s",
+                                label, resp.status, text,
+                            )
+
+                        # Step 3: Commit
+                        url = f"{base}{RCI_ROOT}/components/commit"
+                        _LOGGER.info(
+                            "Committing update on node %s", label
+                        )
+                        async with async_timeout.timeout(self._request_timeout):
+                            resp = await self._session.post(
+                                url,
+                                json={"reason": "manual"},
+                                headers=node_headers,
+                            )
+                        if resp.status in (200, 204):
+                            _LOGGER.info(
+                                "Node %s firmware update started via "
+                                "components/commit",
+                                label,
+                            )
+                            return True
+
+                        text = await resp.text()
+                        _LOGGER.warning(
+                            "Node %s commit returned %s: %s",
+                            label, resp.status, text,
+                        )
+                    else:
+                        _LOGGER.debug(
+                            "Node %s has no ndw.components in version info",
+                            label,
+                        )
+                elif resp.status == 401:
+                    _LOGGER.debug("Auth rejected on node %s port %s", label, port)
+                    continue
+            except asyncio.TimeoutError:
+                _LOGGER.debug("Timeout connecting to node %s port %s", label, port)
+                continue
+            except Exception as err:
+                _LOGGER.debug(
+                    "Components update on node %s failed: %s", label, err
+                )
+
+            # Fallback: POST /rci/system/update (older firmware)
+            try:
+                url = f"{base}{RCI_ROOT}/system/update"
+                _LOGGER.info("Attempting update on node %s via %s", label, url)
+                async with async_timeout.timeout(self._request_timeout):
+                    resp = await self._session.post(
+                        url,
+                        json={"confirm": True},
+                        headers=node_headers,
+                    )
+                if resp.status in (200, 204):
+                    _LOGGER.info(
+                        "Node %s firmware update started via system/update", label
+                    )
+                    return True
+                if resp.status != 404:
+                    text = await resp.text()
+                    _LOGGER.debug(
+                        "Node %s system/update returned %s: %s",
+                        label, resp.status, text,
+                    )
+            except asyncio.TimeoutError:
+                _LOGGER.debug("Timeout on system/update for node %s", label)
+            except Exception as err:
+                _LOGGER.debug("system/update on node %s failed: %s", label, err)
+
+        msg = f"Could not start firmware update on node {label}"
+        _LOGGER.error(msg)
+        raise HomeAssistantError(msg)
+
+    async def _authenticate_to_node(
+        self, node_ip: str, port: int | None = None
+    ) -> Dict[str, str] | None:
+        """Perform NDW2 challenge auth against a specific mesh node.
+
+        Always attempts challenge auth first since mesh nodes typically
+        require it, even when the controller uses Basic Auth.
+
+        Returns headers dict with session cookie, or None if auth failed.
+        """
+        if port is None:
+            port = self._port
+
+        scheme = "https" if self._ssl else "http"
+        auth_url = f"{scheme}://{node_ip}:{port}/auth"
+
+        try:
+            # Step 1: GET /auth to get challenge
+            async with async_timeout.timeout(self._request_timeout):
+                get_resp = await self._session.get(
+                    auth_url, allow_redirects=False
+                )
+
+            challenge = get_resp.headers.get("X-NDM-Challenge")
+            realm = get_resp.headers.get("X-NDM-Realm", "")
+
+            if not challenge:
+                _LOGGER.debug(
+                    "Node %s did not return challenge header, "
+                    "trying basic auth fallback",
+                    node_ip,
+                )
+                return dict(self._auth_header or {})
+
+            # Step 2: Compute hash
+            ha1 = hashlib.md5(
+                f"{self._username}:{realm}:{self._password}".encode()
+            ).hexdigest()
+            response_hash = hashlib.sha256(
+                (challenge + ha1).encode()
+            ).hexdigest()
+
+            # Extract session cookie
+            raw_cookie = get_resp.headers.get("Set-Cookie", "")
+            session_cookie = None
+            if raw_cookie:
+                cookie_kv = raw_cookie.split(";")[0].strip()
+                if "=" in cookie_kv:
+                    session_cookie = cookie_kv
+
+            # Step 3: POST /auth with credentials
+            post_headers: Dict[str, str] = {}
+            if session_cookie:
+                post_headers["Cookie"] = session_cookie
+
+            async with async_timeout.timeout(self._request_timeout):
+                post_resp = await self._session.post(
+                    auth_url,
+                    json={"login": self._username, "password": response_hash},
+                    headers=post_headers,
+                )
+
+            if post_resp.status in (200, 204):
+                _LOGGER.debug(
+                    "Challenge auth to node %s:%s succeeded", node_ip, port
+                )
+                return {"Cookie": session_cookie} if session_cookie else {}
+
+            _LOGGER.debug(
+                "Challenge auth to node %s:%s returned status %s",
+                node_ip, port, post_resp.status,
+            )
+            return None
+
+        except asyncio.TimeoutError:
+            _LOGGER.debug("Timeout during auth to node %s:%s", node_ip, port)
+            return None
         except Exception as err:
-            _LOGGER.error("Error starting firmware update: %s", err)
-            raise HomeAssistantError(f"Failed to start update: {err}")
+            _LOGGER.debug(
+                "Auth to node %s:%s failed: %s", node_ip, port, err
+            )
+            return None
 
 
     async def async_get_update_progress(self) -> Dict[str, Any]:

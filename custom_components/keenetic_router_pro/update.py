@@ -38,13 +38,13 @@ async def async_setup_entry(
         KeeneticFirmwareUpdate(coordinator, entry, client),
     ]
 
-    # Mesh node firmware update entities (info-only, no install)
+    # Mesh node firmware update entities
     mesh_nodes = coordinator.data.get("mesh_nodes", [])
     for node in mesh_nodes:
         node_cid = node.get("cid") or node.get("id")
         if node_cid:
             entities.append(
-                KeeneticMeshFirmwareUpdate(coordinator, entry, node_cid)
+                KeeneticMeshFirmwareUpdate(coordinator, entry, node_cid, client)
             )
 
     async_add_entities(entities)
@@ -89,14 +89,22 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
         available = system.get("fw-available") or system.get("release-available")
         current = system.get("title") or system.get("release")
 
-        # Only report as available if it differs from current
-        # and the update channel is stable
+        # Show update if router reports one available, regardless of channel
         if (
             available
             and current
             and available != current
-            and system.get("fw-update-sandbox", "stable") == "stable"
+            and system.get("fw-update-available", True)
         ):
+            # HA's UpdateEntity uses AwesomeVersion comparison (latest > installed).
+            # When switching channels (e.g. dev→stable), the available version
+            # may be numerically lower. Append a suffix to bypass version comparison.
+            try:
+                from awesomeversion import AwesomeVersion
+                if AwesomeVersion(available) < AwesomeVersion(current):
+                    return f"{available} (channel switch)"
+            except Exception:
+                pass
             return available
 
         # No update available → return current so HA shows "up to date"
@@ -123,14 +131,19 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
         channel = system.get("fw-update-sandbox", "stable")
 
         if available and current and available != current:
-            return (
+            notes = (
                 f"**{model}** firmware update available\n\n"
                 f"- Current: `{current}`\n"
                 f"- Available: `{available}`\n"
                 f"- Channel: {channel}\n\n"
+            )
+            if channel and channel != "stable":
+                notes += f"⚠️ This is a **{channel}** release.\n\n"
+            notes += (
                 f"Visit [Keenetic Release Notes]({KEENETIC_RELEASE_NOTES_URL}) "
                 f"for detailed changelog."
             )
+            return notes
         return None
 
     async def async_install(
@@ -153,27 +166,54 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
                 self.async_write_ha_state()
                 raise HomeAssistantError("Router did not accept the update command")
 
-            # Poll progress until complete or timeout
             import asyncio
 
-            for _ in range(120):  # ~2 min max polling
-                await asyncio.sleep(2)
+            # Try to get initial progress to detect if endpoint is available
+            progress_supported = False
+            try:
+                initial = await self._client.async_get_update_progress()
+                progress_supported = bool(initial and initial.get("in_progress"))
+            except Exception:
+                pass
 
-                try:
-                    progress = await self._client.async_get_update_progress()
-                except Exception:
-                    # Connection lost likely means router is rebooting
-                    self._update_progress = 95
-                    self.async_write_ha_state()
-                    break
+            if progress_supported:
+                # Poll progress until complete or timeout
+                for _ in range(120):  # ~4 min max polling
+                    await asyncio.sleep(2)
+                    try:
+                        progress = await self._client.async_get_update_progress()
+                    except Exception:
+                        # Connection lost — router is likely rebooting
+                        self._update_progress = 95
+                        self.async_write_ha_state()
+                        break
 
-                if not progress.get("in_progress", False):
-                    break
+                    if not progress.get("in_progress", False):
+                        break
 
-                percent = progress.get("progress_percent", 0)
-                if isinstance(percent, (int, float)) and 0 <= percent <= 100:
-                    self._update_progress = int(percent)
-                    self.async_write_ha_state()
+                    percent = progress.get("progress_percent", 0)
+                    if isinstance(percent, (int, float)) and 0 <= percent <= 100:
+                        self._update_progress = int(percent)
+                        self.async_write_ha_state()
+            else:
+                # No progress endpoint — wait for router to reboot
+                _LOGGER.info(
+                    "Update progress not available on this router, "
+                    "waiting for reboot"
+                )
+                self._update_progress = 50
+                self.async_write_ha_state()
+
+                # Wait until connection is lost (router rebooting)
+                for _ in range(60):  # ~2 min to start reboot
+                    await asyncio.sleep(2)
+                    try:
+                        await self._client.async_get_system_info()
+                    except Exception:
+                        # Connection lost — router is rebooting
+                        self._update_progress = 90
+                        self.async_write_ha_state()
+                        break
 
         except HomeAssistantError:
             raise
@@ -189,21 +229,25 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
 
 
 class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
-    """Firmware update entity for a Keenetic mesh node (info-only)."""
+    """Firmware update entity for a Keenetic mesh node."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "firmware_update"
     _attr_device_class = UpdateDeviceClass.FIRMWARE
-    # Mesh nodes update via the controller, so no install feature
-    _attr_supported_features = UpdateEntityFeature(0)
+    _attr_supported_features = (
+        UpdateEntityFeature.INSTALL
+        | UpdateEntityFeature.RELEASE_NOTES
+    )
 
     def __init__(
         self,
         coordinator: KeeneticCoordinator,
         entry: ConfigEntry,
         node_cid: str,
+        client: KeeneticClient,
     ) -> None:
         MeshEntity.__init__(self, coordinator, entry.entry_id, entry.title, node_cid)
+        self._client = client
 
     @property
     def unique_id(self) -> str:
@@ -228,6 +272,16 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
         current = node.get("firmware")
 
         if available and current and available != current:
+            # HA's UpdateEntity uses AwesomeVersion comparison (latest > installed).
+            # When switching channels (e.g. dev→stable), the available version
+            # may be numerically lower. Append a suffix to bypass version comparison
+            # and fall back to HA's != check.
+            try:
+                from awesomeversion import AwesomeVersion
+                if AwesomeVersion(available) < AwesomeVersion(current):
+                    return f"{available} (channel switch)"
+            except Exception:
+                pass
             return available
         return current
 
@@ -235,3 +289,89 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
     def release_url(self) -> str | None:
         """Return the release notes URL."""
         return KEENETIC_RELEASE_NOTES_URL
+
+    async def async_release_notes(self) -> str | None:
+        """Return release notes for the latest version."""
+        node = self._node
+        if not node:
+            return None
+        available = node.get("firmware_available")
+        current = node.get("firmware")
+        name = node.get("name") or node.get("model") or self._node_cid
+
+        if available and current and available != current:
+            return (
+                f"**{name}** firmware update available\n\n"
+                f"- Current: `{current}`\n"
+                f"- Available: `{available}`\n\n"
+                f"Update is managed by the controller router.\n\n"
+                f"Visit [Keenetic Release Notes]({KEENETIC_RELEASE_NOTES_URL}) "
+                f"for detailed changelog."
+            )
+        return None
+
+    async def async_install(
+        self,
+        version: str | None,
+        backup: bool,
+        **kwargs: Any,
+    ) -> None:
+        """Install firmware update for this mesh node via direct connection."""
+        node = self._node
+        node_name = (node.get("name") or self._node_cid) if node else self._node_cid
+        node_ip = node.get("ip") if node else None
+
+        if not node_ip:
+            raise HomeAssistantError(
+                f"Cannot update {node_name}: node IP address not available. "
+                f"Is the node online?"
+            )
+
+        _LOGGER.info(
+            "Starting firmware update for mesh node %s (%s)", node_name, node_ip
+        )
+
+        try:
+            result = await self._client.async_start_node_firmware_update(
+                node_ip=node_ip,
+                node_name=node_name,
+            )
+
+            if not result:
+                raise HomeAssistantError(
+                    f"Node {node_name} did not accept the update command"
+                )
+
+            import asyncio
+
+            _LOGGER.info(
+                "Update started on %s, waiting for node to reboot", node_name
+            )
+            await asyncio.sleep(10)
+
+            # Wait until node reports updated firmware or timeout
+            for _ in range(90):  # ~3 min
+                await asyncio.sleep(2)
+                try:
+                    await self.coordinator.async_request_refresh()
+                    updated_node = self._node
+                    if updated_node:
+                        new_fw = updated_node.get("firmware")
+                        avail = updated_node.get("firmware_available")
+                        if new_fw and avail and new_fw == avail:
+                            _LOGGER.info(
+                                "Mesh node %s updated to %s", node_name, new_fw
+                            )
+                            break
+                except Exception:
+                    pass
+
+        except HomeAssistantError:
+            raise
+        except Exception as err:
+            _LOGGER.error("Mesh firmware update failed for %s: %s", node_name, err)
+            raise HomeAssistantError(
+                f"Mesh firmware update failed for {node_name}: {err}"
+            ) from err
+
+        await self.coordinator.async_request_refresh()

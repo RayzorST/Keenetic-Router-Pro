@@ -46,6 +46,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         merged_system = {**system, **version}
         merged_system["release-available"] = version_available.get("title") or version_available.get("release")
         merged_system["fw-update-sandbox"] = version_available.get("sandbox")
+        merged_system["fw-update-available"] = version_available.get("update-available", False)
 
         # Interface verisini bir kez çek, tüm metotlara paylaştır
         interfaces = await self.client.async_get_interfaces()
